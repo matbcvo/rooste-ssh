@@ -112,6 +112,75 @@ jobs:
             target/release/rooste
             target/release/rooste-cli
 
+  macos:
+    name: macOS disk image (${{ matrix.arch }})
+    needs: notices
+    # Apple Silicon runner; the Intel build is cross-compiled.
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: arm64
+          - target: x86_64-apple-darwin
+            arch: x64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      # The cache can restore output from an earlier run; start clean.
+      - name: Remove old packages
+        run: rm -rf target/packages target/dmg
+      - uses: actions/download-artifact@v8
+        with:
+          name: notices
+          path: target/notices
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager
+      - name: Version
+        id: version
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-gui") | .version')" >> "$GITHUB_OUTPUT"
+      - run: cargo build --release -p rooste-gui -p rooste-cli --target ${{ matrix.target }}
+      # cargo-packager reads the binaries from target/release.
+      - name: Stage the binaries
+        run: |
+          mkdir -p target/release
+          cp target/${{ matrix.target }}/release/rooste target/${{ matrix.target }}/release/rooste-cli target/release/
+          file target/release/rooste
+      - run: cargo packager --release -p rooste-gui --formats app
+      # Without a signature, macOS calls downloaded Apple Silicon apps
+      # "damaged". An ad-hoc signature is free; notarization is not.
+      - name: Ad-hoc sign the app
+        run: |
+          app=$(find target/packages -maxdepth 1 -name '*.app' | head -1)
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --verbose=2 "$app"
+      - name: Disk image
+        run: |
+          name=rooste-ssh-${{ steps.version.outputs.version }}-macos-${{ matrix.arch }}
+          mkdir -p target/dmg
+          cp -R target/packages/*.app target/dmg/
+          ln -s /Applications target/dmg/Applications
+          hdiutil create -volname "Rooste SSH" -srcfolder target/dmg -ov -format UDZO "target/packages/$name.dmg"
+          ls -la target/packages
+      - name: Smoke test the disk image
+        if: matrix.arch == 'arm64'
+        run: |
+          hdiutil attach target/packages/*.dmg -mountpoint /tmp/rooste-dmg
+          "/tmp/rooste-dmg/Rooste SSH.app/Contents/MacOS/rooste" --version
+          "/tmp/rooste-dmg/Rooste SSH.app/Contents/MacOS/rooste-cli" --version
+          hdiutil detach /tmp/rooste-dmg
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-packages-${{ matrix.arch }}
+          path: target/packages/*.dmg
+
   windows:
     name: Windows installer and portable zip
     needs: notices
@@ -259,7 +328,7 @@ jobs:
   publish:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows, flatpak]
+    needs: [linux, windows, macos, flatpak]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -276,7 +345,7 @@ jobs:
         run: |
           mkdir release
           find artifacts \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' \
-            -o -name '*.msi' -o -name '*.zip' -o -name '*.flatpak' -o -name 'THIRD-PARTY-LICENSES.html' \) \
+            -o -name '*.msi' -o -name '*.zip' -o -name '*.dmg' -o -name '*.flatpak' -o -name 'THIRD-PARTY-LICENSES.html' \) \
             -exec cp {} release/ \;
           (cd release && sha256sum * > SHA256SUMS)
           cat release/SHA256SUMS

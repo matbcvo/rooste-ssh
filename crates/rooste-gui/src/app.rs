@@ -1514,7 +1514,8 @@ impl RoosteApp {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, KeyboardShortcut, Modifiers};
-        let ctrl_shift = Modifiers::CTRL | Modifiers::SHIFT;
+        // Ctrl+Shift on Linux and Windows, ⌘⇧ on macOS.
+        let ctrl_shift = Modifiers::COMMAND | Modifiers::SHIFT;
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(ctrl_shift, Key::T))) {
             self.dialog = Some(Dialog::QuickConnect);
         }

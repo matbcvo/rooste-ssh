@@ -702,7 +702,10 @@ fn render_readme() {
     shot("palette", Theme::Dark, 720.0, &|harness| {
         let tab = harness.state_mut().tabs_mut().next().unwrap();
         fill(tab, &web_output);
-        harness.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::P);
+        harness.key_press_modifiers(
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+            egui::Key::P,
+        );
         harness.step();
         harness.event(egui::Event::Text("split".into()));
         harness.step();

@@ -626,7 +626,10 @@ fn tabs_open_side_by_side_and_close_with_confirmation() {
     });
 
     // Ctrl+Shift+W asks before closing an active connection.
-    harness.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::W);
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::W,
+    );
     settle(&mut harness);
     harness.get_by_label("This tab has an active connection. Close it?");
     last(&harness, "Close").click();
@@ -890,7 +893,10 @@ fn broadcast_input_reaches_every_tab() {
 fn command_palette_connects_a_session() {
     let f = Fixture::with_server();
     let mut harness = harness(app_with(&f, vec![f.profile("palette target")]));
-    harness.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::P);
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::P,
+    );
     settle(&mut harness);
     harness.get_by_label("Command").type_text("conn palette");
     settle(&mut harness);

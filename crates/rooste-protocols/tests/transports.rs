@@ -111,7 +111,8 @@ async fn telnet_negotiation_size_and_terminal_type() {
     conformance(&mut t, b"hello\r", "echo: hello").await;
 }
 
-#[cfg(unix)]
+// Pseudo-terminal pairs from serial2 are only available on Linux.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn serial_pseudo_terminal_pair() {
     use rooste_protocols::serial::SerialTransport;

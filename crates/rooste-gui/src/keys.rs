@@ -49,6 +49,10 @@ impl KeyTranslator {
                 }
                 Some(Action::Send(text.as_bytes().to_vec()))
             }
+            // On macOS ⌘C, ⌘X and ⌘V are the clipboard keys; Ctrl+C reaches
+            // the terminal as a key press and interrupts as usual.
+            Event::Copy | Event::Cut if cfg!(target_os = "macos") => Some(Action::Copy),
+            Event::Paste(text) if cfg!(target_os = "macos") => Some(Action::Paste(text.clone())),
             Event::Copy if modifiers.shift || has_selection => Some(Action::Copy),
             Event::Copy => Some(Action::Send(vec![0x03])),
             Event::Cut => Some(Action::Send(vec![0x18])),
@@ -242,6 +246,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
+    fn clipboard_shortcuts_on_macos() {
+        let mut t = KeyTranslator::default();
+        let mode = InputMode::default();
+        for event in [Event::Copy, Event::Cut] {
+            assert_eq!(
+                t.translate(&event, Modifiers::COMMAND, mode, false),
+                Some(Action::Copy)
+            );
+        }
+        assert_eq!(
+            t.translate(&Event::Paste("x".into()), Modifiers::COMMAND, mode, false),
+            Some(Action::Paste("x".into()))
+        );
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
     fn clipboard_shortcuts() {
         let mut t = KeyTranslator::default();
         let mode = InputMode::default();
