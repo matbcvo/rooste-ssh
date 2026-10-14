@@ -5,7 +5,7 @@ session manager, an SFTP file panel, port forwarding, and built-in key tools and
 
 *Rooste* is Estonian for *rust*, the language it's written in.
 
-![Rooste SSH with two sessions side by side and the session manager](docs/images/split.png)
+![Rooste SSH with two sessions, one above the other, an SFTP panel and the session manager](docs/images/split.png)
 
 ## Features
 
