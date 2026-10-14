@@ -5,7 +5,7 @@ session manager, an SFTP file panel, port forwarding, and built-in key tools and
 
 *Rooste* is Estonian for *rust*, the language it's written in.
 
-![Rooste SSH with saved sessions, a terminal and the SFTP file panel](docs/images/rooste-dark.png)
+![Rooste SSH with two sessions side by side and the session manager](docs/images/split.png)
 
 ## Features
 
@@ -27,12 +27,40 @@ session manager, an SFTP file panel, port forwarding, and built-in key tools and
   opt-in per session for old devices that need outdated algorithms.
 - **Works with what you have:** imports hosts from `~/.ssh/config` and saved sessions from PuTTY.
 
-<details>
-<summary>Light theme</summary>
+## Screenshots
 
-![Rooste SSH in the light theme](docs/images/rooste-light.png)
-
-</details>
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/files.png" alt="The SFTP file panel next to a terminal">
+      <p><b>SFTP file panel</b>: browse the server, download or upload files and folders.</p>
+    </td>
+    <td width="50%">
+      <img src="docs/images/editor.png" alt="The session editor with a jump host and two tunnels">
+      <p><b>Saved sessions</b>: jump hosts, tags and tunnels that start with the session.</p>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <img src="docs/images/search.png" alt="Searching the terminal output">
+      <p><b>Search</b> through everything a session printed (Ctrl+Shift+F).</p>
+    </td>
+    <td>
+      <img src="docs/images/palette.png" alt="The command palette filtered to split commands">
+      <p><b>Command palette</b>: every action a few keystrokes away (Ctrl+Shift+P).</p>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <img src="docs/images/keygen.png" alt="The key generator">
+      <p><b>Key tools</b>: generate keys, convert <code>.ppk</code> keys, run a built-in agent.</p>
+    </td>
+    <td>
+      <img src="docs/images/light.png" alt="Rooste SSH in the light theme">
+      <p><b>Light theme</b>, or dark, in Settings.</p>
+    </td>
+  </tr>
+</table>
 
 ## Installing
 
