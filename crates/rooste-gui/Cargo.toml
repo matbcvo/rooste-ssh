@@ -13,5 +13,19 @@ publish = false
 name = "rooste"
 path = "src/main.rs"
 
+[dependencies]
+arboard.workspace = true
+eframe.workspace = true
+egui.workspace = true
+futures.workspace = true
+rooste-proto.workspace = true
+rooste-term.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+egui_kittest.workspace = true
+rooste-testkit.workspace = true
+tempfile.workspace = true
+
 [lints]
 workspace = true

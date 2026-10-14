@@ -3,15 +3,21 @@
 A modern, memory-safe SSH client for Linux and Windows, written in Rust — with tabs, split panes,
 a session manager, built-in SFTP, key generator and agent.
 
-> **Status:** early development — milestone M1, a command-line SSH client, is done. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** early development — M2 is done: a desktop app with a working terminal and a
+> command-line client. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Building
 
-Requires Rust 1.89 or newer.
+Requires Rust 1.95 or newer.
 
 ```sh
 cargo build --release
 cargo run -p rooste-gui     # desktop app (binary: rooste)
+```
+
+On Linux the desktop app needs the usual X11 or Wayland libraries (present on any desktop).
+
+```sh
 cargo run -p rooste-cli -- user@host       # interactive shell
 cargo run -p rooste-cli -- user@host ls    # run a command
 ```

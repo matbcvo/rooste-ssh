@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/matbcvo/rooste-ssh"
 authors = ["Martin Vooremäe"]
@@ -18,8 +18,14 @@ rooste-keys = { path = "crates/rooste-keys" }
 rooste-sftp = { path = "crates/rooste-sftp" }
 rooste-testkit = { path = "crates/rooste-testkit" }
 
+alacritty_terminal = { version = "0.26.0", default-features = false }
 anyhow = "1.0.104"
+arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
 clap = { version = "4.6.7", features = ["derive"] }
+eframe = "0.36.2"
+egui = "0.36.2"
+egui_kittest = { version = "0.36.2", features = ["wgpu", "snapshot"] }
+insta = "1.49.0"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures = "0.3.34"
 rpassword = "7.5.4"
@@ -40,3 +46,10 @@ all = { level = "warn", priority = -1 }
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Keep debug builds small: line tables for our code, no debug info for dependencies.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

@@ -39,7 +39,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        toolchain: [stable, "1.89"] # keep in sync with rust-version in Cargo.toml
+        toolchain: [stable, "1.95"] # keep in sync with rust-version in Cargo.toml
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
