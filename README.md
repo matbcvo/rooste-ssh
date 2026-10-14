@@ -3,6 +3,8 @@
 A fast, memory-safe SSH client for Linux and Windows, written in Rust: tabs and split panes, a
 session manager, an SFTP file panel, port forwarding, and built-in key tools and agent.
 
+*Rooste* is Estonian for *rust*, the language it's written in.
+
 ![Rooste SSH with saved sessions, a terminal and the SFTP file panel](docs/images/rooste-dark.png)
 
 ## Features
