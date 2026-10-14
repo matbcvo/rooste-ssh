@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use egui::{RichText, Ui};
 use rooste_core::Settings;
 use rooste_protocols::ssh::UnknownHostKey;
-use rooste_terminal::{Palette, TermEvent, Terminal};
+use rooste_terminal::{Palette, SearchDirection, TermEvent, Terminal};
 use tokio::sync::oneshot;
 
 use crate::files::FilesPanel;
@@ -55,6 +55,16 @@ pub enum TabAction {
     RememberDownloadFolder(std::path::PathBuf),
 }
 
+/// The find bar's state.
+#[derive(Debug, Default)]
+pub struct FindBar {
+    pub query: String,
+    /// Whether the last search found something (`None` before searching).
+    pub found: Option<bool>,
+    /// Focus the text field on the next frame.
+    focus: bool,
+}
+
 #[derive(Debug)]
 pub struct SessionTab {
     /// Unique and stable for the tab's lifetime (egui_tiles moves panes in
@@ -80,6 +90,8 @@ pub struct SessionTab {
     /// Why the last attempt failed, when it did.
     pub failure: Option<Failure>,
     pub prompt: Option<PendingPrompt>,
+    /// The find bar above the terminal, when open.
+    pub find: Option<FindBar>,
     /// The SFTP side panel, when shown.
     pub files: Option<FilesPanel>,
     download_dir: std::path::PathBuf,
@@ -129,6 +141,7 @@ impl SessionTab {
             auto_reconnect: settings.auto_reconnect,
             failure: None,
             prompt: None,
+            find: None,
             files: None,
             download_dir: crate::theme::download_dir(settings),
             recent_download_dir: crate::theme::recent_download_dir(settings),
@@ -176,6 +189,97 @@ impl SessionTab {
         // The SFTP session belonged to the old connection.
         if self.files.is_some() {
             self.files = Some(self.new_files_panel());
+        }
+    }
+
+    /// Open the find bar (or focus it if it is open).
+    pub fn open_find(&mut self) {
+        let find = self.find.get_or_insert_with(FindBar::default);
+        find.focus = true;
+    }
+
+    fn find_ui(&mut self, ui: &mut Ui) {
+        let Some(find) = &mut self.find else {
+            return;
+        };
+        let mut search = None;
+        let mut close = false;
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(8, 4))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut find.query)
+                            .margin(crate::theme::FIELD_MARGIN)
+                            .hint_text("Find")
+                            .desired_width(240.0),
+                    );
+                    edit.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Find")
+                    });
+                    if std::mem::take(&mut find.focus) {
+                        edit.request_focus();
+                    }
+                    let (enter, shift, escape) = ui.input(|i| {
+                        (
+                            i.key_pressed(egui::Key::Enter),
+                            i.modifiers.shift,
+                            i.key_pressed(egui::Key::Escape),
+                        )
+                    });
+                    if edit.changed() {
+                        search = Some((SearchDirection::Up, true));
+                    }
+                    // Enter: previous (older) match; Shift+Enter: next.
+                    if edit.lost_focus() && enter {
+                        let direction = if shift {
+                            SearchDirection::Down
+                        } else {
+                            SearchDirection::Up
+                        };
+                        search = Some((direction, false));
+                        edit.request_focus();
+                    }
+                    if (edit.has_focus() || edit.lost_focus()) && escape {
+                        close = true;
+                    }
+                    if ui
+                        .button("⬆")
+                        .on_hover_text("Previous match (Enter)")
+                        .clicked()
+                    {
+                        search = Some((SearchDirection::Up, false));
+                    }
+                    if ui
+                        .button("⬇")
+                        .on_hover_text("Next match (Shift+Enter)")
+                        .clicked()
+                    {
+                        search = Some((SearchDirection::Down, false));
+                    }
+                    if find.found == Some(false) {
+                        ui.colored_label(ui.visuals().error_fg_color, "Not found");
+                    }
+                    if ui.button("✕").on_hover_text("Close (Esc)").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if let Some((direction, restart)) = search {
+            if restart {
+                // The text changed: start again from the newest output.
+                self.terminal.clear_search();
+            }
+            find.found = if find.query.is_empty() {
+                self.terminal.clear_search();
+                None
+            } else {
+                Some(self.terminal.find(&find.query, direction))
+            };
+        }
+        if close {
+            self.find = None;
+            self.terminal.clear_search();
         }
     }
 
@@ -476,6 +580,7 @@ impl SessionTab {
                 }
             });
         }
+        self.find_ui(ui);
         let panel_id = egui::Id::new(("files", self.id));
         if let Some(files) = &mut self.files {
             files.poll();

@@ -3,7 +3,9 @@
 
 use insta::assert_snapshot;
 use rooste_terminal::input::InputMode;
-use rooste_terminal::{MouseReport, Palette, Rgb, SelectionKind, TermEvent, Terminal};
+use rooste_terminal::{
+    MouseReport, Palette, Rgb, SearchDirection, SelectionKind, TermEvent, Terminal,
+};
 
 fn term(cols: u16, rows: u16, input: &str) -> Terminal {
     let mut t = Terminal::new(cols, rows);
@@ -241,4 +243,39 @@ fn garbage_input_does_not_panic() {
     let noise: Vec<u8> = (0..20_000u32).map(|i| (i * 7919 % 256) as u8).collect();
     t.advance(&noise);
     let _ = t.screen();
+}
+
+#[test]
+fn find_walks_through_matches_in_the_scrollback() {
+    let mut term = Terminal::with_options(20, 3, rooste_terminal::Palette::default(), 100);
+    for i in 0..10 {
+        term.advance(format!("line {i} error\r\n").as_bytes());
+    }
+    term.advance(b"Error at the end\r\n$ ");
+
+    // Up first: the newest match. Lower-case text ignores case.
+    assert!(term.find("error", SearchDirection::Up));
+    assert_eq!(term.selection_text().as_deref(), Some("Error"));
+    assert_eq!(term.display_offset(), 0);
+
+    // Further up goes into the scrollback.
+    assert!(term.find("error", SearchDirection::Up));
+    assert_eq!(term.selection_text().as_deref(), Some("error"));
+    assert!(term.find("line 3", SearchDirection::Up));
+    assert!(term.display_offset() > 0, "scrolled to the match");
+    assert_eq!(term.selection_text().as_deref(), Some("line 3"));
+    assert!(term.find("line 4", SearchDirection::Down));
+    assert_eq!(term.selection_text().as_deref(), Some("line 4"));
+
+    // Capitals make it case-sensitive; special characters are literal.
+    term.clear_search();
+    assert!(term.find("Error", SearchDirection::Up));
+    assert!(
+        term.find("Error", SearchDirection::Up),
+        "wraps around to the same match"
+    );
+    assert!(!term.find("line 1.", SearchDirection::Up));
+    assert!(!term.find("nothing like this", SearchDirection::Up));
+    term.clear_search();
+    assert_eq!(term.selection_text(), None);
 }
