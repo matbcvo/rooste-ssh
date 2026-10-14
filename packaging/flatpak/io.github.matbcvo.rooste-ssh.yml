@@ -1,0 +1,33 @@
+# Flatpak bundle built from the release binaries (see release.yml). A
+# Flathub submission would build from source instead.
+app-id: io.github.matbcvo.rooste-ssh
+runtime: org.freedesktop.Platform
+runtime-version: "24.08"
+sdk: org.freedesktop.Sdk
+command: rooste
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --device=dri
+  # Serial ports.
+  - --device=all
+  # SSH keys, known_hosts, ~/.ssh/config and downloads.
+  - --filesystem=home
+  - --socket=ssh-auth
+  # Saved passwords in the system keyring.
+  - --talk-name=org.freedesktop.secrets
+modules:
+  - name: rooste-ssh
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 rooste /app/bin/rooste
+      - install -Dm755 rooste-cli /app/bin/rooste-cli
+      - install -Dm644 io.github.matbcvo.rooste-ssh.desktop /app/share/applications/io.github.matbcvo.rooste-ssh.desktop
+      - install -Dm644 icon-256.png /app/share/icons/hicolor/256x256/apps/io.github.matbcvo.rooste-ssh.png
+      - install -Dm644 io.github.matbcvo.rooste-ssh.metainfo.xml /app/share/metainfo/io.github.matbcvo.rooste-ssh.metainfo.xml
+      - install -Dm644 THIRD-PARTY-LICENSES.html /app/share/doc/rooste-ssh/THIRD-PARTY-LICENSES.html
+    sources:
+      - type: dir
+        path: staging

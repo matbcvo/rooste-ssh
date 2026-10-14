@@ -6,6 +6,20 @@ a session manager, built-in SFTP, key generator and agent.
 > **Status:** early development — M5b is done: SSH, telnet, raw TCP and serial sessions; tabs and
 > split panes; port forwarding and jump hosts; an SFTP file panel, key tools and a built-in agent. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## Installing
+
+Download a release from the [releases page](https://github.com/matbcvo/rooste-ssh/releases):
+
+| Platform | File |
+|---|---|
+| Windows | `rooste-ssh-*-x64.msi` (installer) or `rooste-ssh-*-windows-x64-portable.zip` |
+| Debian, Ubuntu | `rooste-ssh-*-amd64.deb` — `sudo apt install ./rooste-ssh-*-amd64.deb` |
+| Fedora, openSUSE | `rooste-ssh-*.x86_64.rpm` |
+| Any Linux | `rooste-ssh-*-x86_64.AppImage`, the `.tar.gz`, or `rooste-ssh.flatpak` |
+
+Every release lists SHA-256 checksums in `SHA256SUMS`. Both programs are included: `rooste` (the
+desktop app) and `rooste-cli` (command line).
+
 ## Building
 
 Requires Rust 1.95 or newer.

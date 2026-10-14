@@ -30,6 +30,8 @@ allow = [
     # Fonts bundled by egui; their license texts ship with releases.
     "OFL-1.1",
     "Ubuntu-font-1.0",
+    # Mozilla root certificate data (via rustls-platform-verifier).
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9
 

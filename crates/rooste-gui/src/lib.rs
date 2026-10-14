@@ -14,5 +14,6 @@ pub mod tab;
 pub mod terminal_view;
 pub mod theme;
 pub mod tools;
+pub mod update;
 
 pub use app::RoosteApp;

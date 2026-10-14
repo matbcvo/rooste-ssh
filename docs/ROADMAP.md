@@ -143,10 +143,19 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
   in-process telnet server; BusyBox `telnetd` in Linux CI; serial over a pseudo-terminal pair on
   Unix; kittest tests for telnet, raw and serial profiles.
 
-### M6 — Distribution
+### M6 — Distribution ✅
 - Windows: MSI (`cargo-wix`), winget, portable zip, code signing.
 - Linux: `.deb`, `.rpm`, AppImage, Flatpak.
 - `release.yml` with smoke tests of the packaged binaries; update check.
+- Done: `cargo packager` builds the MSI, `.deb` and AppImage; `cargo generate-rpm` the RPM; a
+  portable zip and a Flatpak bundle from the release binaries; third-party license notices via
+  `cargo-about`. The release workflow installs the MSI and `.deb` and logs in to an SSH server with
+  the installed `rooste-cli` before anything is published, then attaches every file with
+  `SHA256SUMS`. Code signing runs when a certificate is configured (`WINDOWS_CERTIFICATE` and
+  `WINDOWS_CERTIFICATE_PASSWORD` secrets). winget manifests are generated for submission. The app
+  can check GitHub for newer releases at startup (Settings).
+- Needs the maintainer's accounts: a code-signing certificate, the winget-pkgs pull request, and
+  a source-built manifest for Flathub.
 
 ### Later
 Serving Pageant's protocol from the built-in agent (Windows), folder uploads in the file panel,

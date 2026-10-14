@@ -25,7 +25,9 @@ rooste-keys.workspace = true
 rooste-proto.workspace = true
 rooste-sftp.workspace = true
 rooste-term.workspace = true
+serde.workspace = true
 tokio.workspace = true
+ureq.workspace = true
 
 [dev-dependencies]
 rooste-keys.workspace = true
@@ -36,3 +38,36 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
+
+# Installers and Linux packages (cargo packager, see release.yml).
+[package.metadata.packager]
+product-name = "rooste-ssh"
+identifier = "io.github.matbcvo.rooste-ssh"
+publisher = "Martin Vooremäe"
+description = "SSH, telnet and serial terminal with tabs, SFTP and port forwarding"
+long-description = "A memory-safe SSH client with saved sessions, tabs and split panes, an SFTP file panel, port forwarding, jump hosts, a key generator and a built-in SSH agent. Telnet, raw TCP and serial connections are supported too."
+homepage = "https://github.com/matbcvo/rooste-ssh"
+authors = ["Martin Vooremäe"]
+license-file = "../../LICENSE"
+copyright = "Copyright (c) 2026 Martin Vooremäe"
+category = "DeveloperTool"
+icons = ["../../packaging/icons/icon-32.png", "../../packaging/icons/icon-128.png", "../../packaging/icons/icon-256.png", "../../packaging/icons/rooste.ico"]
+binaries-dir = "../../target/release"
+out-dir = "../../target/packages"
+binaries = [{ path = "rooste", main = true }, { path = "rooste-cli" }]
+resources = ["../../LICENSE", "../../target/notices/THIRD-PARTY-LICENSES.html"]
+
+# RPM (cargo generate-rpm -p crates/rooste-gui).
+[package.metadata.generate-rpm]
+name = "rooste-ssh"
+summary = "SSH, telnet and serial terminal with tabs, SFTP and port forwarding"
+license = "MIT"
+assets = [
+    { source = "target/release/rooste", dest = "/usr/bin/rooste", mode = "755" },
+    { source = "target/release/rooste-cli", dest = "/usr/bin/rooste-cli", mode = "755" },
+    { source = "packaging/linux/io.github.matbcvo.rooste-ssh.desktop", dest = "/usr/share/applications/io.github.matbcvo.rooste-ssh.desktop", mode = "644" },
+    { source = "packaging/linux/io.github.matbcvo.rooste-ssh.metainfo.xml", dest = "/usr/share/metainfo/io.github.matbcvo.rooste-ssh.metainfo.xml", mode = "644" },
+    { source = "packaging/icons/icon-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/io.github.matbcvo.rooste-ssh.png", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/licenses/rooste-ssh/LICENSE", mode = "644" },
+    { source = "target/notices/THIRD-PARTY-LICENSES.html", dest = "/usr/share/doc/rooste-ssh/THIRD-PARTY-LICENSES.html", mode = "644" },
+]

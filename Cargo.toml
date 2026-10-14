@@ -34,8 +34,10 @@ keyring = "4.2.0"
 proptest = "1.12.0"
 serial2-tokio = { version = "0.1.25", features = ["unix", "windows"] }
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.11.1"
 toml = "1.1.8"
+ureq = { version = "3.4.2", default-features = false, features = ["rustls-no-provider", "_ring", "platform-verifier", "json"] }
 uuid = { version = "1.28.0", features = ["v4"] }
 winreg = "0.56.0"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }

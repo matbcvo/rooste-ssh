@@ -42,6 +42,8 @@ pub struct Settings {
     pub download_dir: String,
     /// Offer the built-in agent's keys to rooste-ssh's own sessions.
     pub use_builtin_agent: bool,
+    /// Ask GitHub for a newer release at startup.
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -56,6 +58,7 @@ impl Default for Settings {
             auto_reconnect: true,
             download_dir: String::new(),
             use_builtin_agent: false,
+            check_updates: true,
         }
     }
 }
