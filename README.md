@@ -36,12 +36,15 @@ session manager, an SFTP file panel, port forwarding, and built-in key tools and
 
 Download a release from the [releases page](https://github.com/matbcvo/rooste-ssh/releases):
 
-| Platform | File |
-|---|---|
-| Windows | `rooste-ssh-*-x64.msi` (installer) or `rooste-ssh-*-windows-x64-portable.zip` |
-| Debian, Ubuntu | `rooste-ssh-*-amd64.deb`: `sudo apt install ./rooste-ssh-*-amd64.deb` |
-| Fedora, openSUSE | `rooste-ssh-*.x86_64.rpm` |
-| Any Linux | `rooste-ssh-*-x86_64.AppImage`, the `.tar.gz`, or `rooste-ssh.flatpak` |
+| Platform | Download | Notes |
+|---|---|---|
+| Windows | `rooste-ssh-*-x64.msi` | Installer, with Start menu entry |
+| Windows (portable) | `rooste-ssh-*-windows-x64-portable.zip` | Unzip and run; settings stay in the folder |
+| Debian, Ubuntu | `rooste-ssh-*-amd64.deb` | `sudo apt install ./rooste-ssh-*-amd64.deb` |
+| Fedora, openSUSE | `rooste-ssh-*.x86_64.rpm` | `sudo dnf install ./rooste-ssh-*.x86_64.rpm` |
+| Any Linux | `rooste-ssh.flatpak` | `flatpak install --user rooste-ssh.flatpak` |
+| Any Linux | `rooste-ssh-*-x86_64.AppImage` | Make it executable and run it |
+| Any Linux | `rooste-ssh-*-linux-x86_64.tar.gz` | Plain binaries |
 
 Every release lists SHA-256 checksums in `SHA256SUMS`. Both programs are included: `rooste` (the
 desktop app) and `rooste-cli` (command line).
