@@ -1,10 +1,25 @@
-//! Core session model shared by every rooste-ssh frontend.
+//! Core session model shared by every rooste-ssh frontend: saved profiles,
+//! application settings, the configuration file, imports from other
+//! clients, and password storage.
+
+pub mod config;
+pub mod import;
+pub mod profile;
+pub mod secrets;
 
 use std::fmt;
 use std::str::FromStr;
 
+use serde::{Deserialize, Serialize};
+
+pub use config::{Config, ConfigLocation, Settings, Theme};
+pub use import::expand_tilde;
+pub use profile::Profile;
+pub use secrets::{MemoryStore, SecretStore};
+
 /// Connection protocol of a saved session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Protocol {
     #[default]
     Ssh,

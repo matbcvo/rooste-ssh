@@ -65,6 +65,35 @@ impl Default for Palette {
 }
 
 impl Palette {
+    /// Dark text on a light background.
+    pub fn light() -> Self {
+        Self {
+            foreground: Rgb::new(0x2a, 0x2a, 0x2a),
+            background: Rgb::new(0xfa, 0xfa, 0xfa),
+            cursor: Rgb::new(0x30, 0x30, 0x30),
+            selection_background: Rgb::new(0xb4, 0xcc, 0xf0),
+            selection_foreground: Rgb::new(0x00, 0x00, 0x00),
+            ansi: [
+                Rgb::new(0x00, 0x00, 0x00),
+                Rgb::new(0xc4, 0x1a, 0x16),
+                Rgb::new(0x1a, 0x8f, 0x29),
+                Rgb::new(0x9c, 0x7a, 0x00),
+                Rgb::new(0x1f, 0x5f, 0xc4),
+                Rgb::new(0xa3, 0x26, 0xa3),
+                Rgb::new(0x0b, 0x86, 0x9c),
+                Rgb::new(0xbf, 0xbf, 0xbf),
+                Rgb::new(0x66, 0x66, 0x66),
+                Rgb::new(0xe0, 0x2e, 0x2a),
+                Rgb::new(0x2b, 0xa8, 0x3a),
+                Rgb::new(0xb5, 0x8f, 0x00),
+                Rgb::new(0x33, 0x75, 0xe0),
+                Rgb::new(0xbf, 0x3f, 0xbf),
+                Rgb::new(0x13, 0x9f, 0xb8),
+                Rgb::new(0x1a, 0x1a, 0x1a),
+            ],
+        }
+    }
+
     /// Color for an xterm 256-color index.
     pub fn indexed(&self, index: u8) -> Rgb {
         match index {

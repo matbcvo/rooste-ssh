@@ -217,6 +217,19 @@ fn selection_text() {
 }
 
 #[test]
+fn palette_and_scrollback_can_change() {
+    let mut t = term(4, 2, "\x1b[31mr");
+    assert_eq!(t.screen().row(0)[0].fg, Palette::default().ansi[1]);
+    t.set_palette(Palette::light());
+    assert_eq!(t.screen().row(0)[0].fg, Palette::light().ansi[1]);
+    assert_eq!(t.screen().background, Palette::light().background);
+
+    t.set_scrollback(2);
+    t.advance(b"\r\n1\r\n2\r\n3\r\n4\r\n5");
+    assert_eq!(t.history_size(), 2);
+}
+
+#[test]
 fn hidden_cursor() {
     assert_eq!(term(4, 2, "\x1b[?25l").screen().cursor, None);
     assert_eq!(term(4, 2, "ab").screen().cursor, Some((2, 0)));

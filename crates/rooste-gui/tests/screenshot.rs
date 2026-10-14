@@ -85,3 +85,83 @@ fn render_box_drawing() {
     std::fs::create_dir_all(&dir).unwrap();
     image.save(dir.join("boxes.png")).unwrap();
 }
+
+#[test]
+#[ignore = "renders with wgpu; run manually to inspect the output"]
+fn render_app() {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use rooste_core::{Config, MemoryStore, Profile};
+    use rooste_gui::RoosteApp;
+    use rooste_testkit::{TEST_PASSWORD, TEST_USER, TestServer};
+
+    let net = tokio::runtime::Runtime::new().unwrap();
+    let server = net.block_on(TestServer::start());
+    let dir = tempfile::tempdir().unwrap();
+    let known_hosts = dir.path().join("known_hosts");
+    rooste_proto::ssh::known_hosts::learn(
+        &known_hosts,
+        "127.0.0.1",
+        server.addr.port(),
+        &server.host_key,
+    )
+    .unwrap();
+    let p = |name: &str, folder: &str| Profile {
+        name: name.into(),
+        folder: folder.into(),
+        host: format!("{}.example.com", name.to_lowercase().replace(' ', "-")),
+        user: "deploy".into(),
+        ..Profile::default()
+    };
+    let live = Profile {
+        name: "Test server".into(),
+        host: "127.0.0.1".into(),
+        port: Some(server.addr.port()),
+        user: TEST_USER.into(),
+        use_agent: false,
+        save_password: true,
+        ..Profile::default()
+    };
+    let config = Config {
+        profiles: vec![
+            p("Web 1", "Work/Production"),
+            p("Web 2", "Work/Production"),
+            p("Database", "Work/Production"),
+            p("Staging", "Work"),
+            p("Raspberry Pi", "Home"),
+            live.clone(),
+        ],
+        ..Config::default()
+    };
+    let app = RoosteApp::with_config(config, None, Arc::new(MemoryStore::default()))
+        .with_known_hosts(known_hosts);
+    app.secrets().set(&live.id, TEST_PASSWORD).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1000.0, 560.0])
+        .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
+    rooste_gui::fonts::install(&harness.ctx);
+    let ctx = harness.ctx.clone();
+    harness.state_mut().connect_profile(&ctx, &live.id);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !harness
+        .state()
+        .tabs()
+        .any(|t| t.terminal.screen_text().contains('$'))
+    {
+        assert!(Instant::now() < deadline);
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    harness.event(egui::Event::Text("hello from rooste".into()));
+    harness.key_press(egui::Key::Enter);
+    for _ in 0..20 {
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    harness.run();
+    let image = harness.render().expect("render with wgpu");
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
+    std::fs::create_dir_all(&out).unwrap();
+    image.save(out.join("app.png")).unwrap();
+}

@@ -98,11 +98,17 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
   `crates/rooste-term/tests`, kittest GUI tests, and an opt-in screenshot test
   (`cargo test -p rooste-gui --test screenshot -- --ignored`).
 
-### M3 — First usable app (MVP)
+### M3 — First usable app (MVP) ✅
 - Session manager with saved profiles.
 - Import from `~/.ssh/config` and other clients (see [Interoperability](#interoperability)).
 - Tabs, settings dialog, host-key confirmation dialog.
-- **Tests required:** `egui_kittest` tests for every new screen and dialog.
+- Passwords in the OS credential store (Windows Credential Manager, Secret Service on Linux);
+  password and key-passphrase prompts with retry, as `ssh` does.
+- Config file: `config.toml` in the platform config directory, or `rooste.toml` next to the
+  executable in portable mode (a `rooste.toml` or empty `portable` file there enables it).
+- **Tests required:** `egui_kittest` tests for every new screen and dialog. Done: session manager,
+  profile editor, search, context menu, imports, settings, password prompt, tab closing;
+  property tests for config round-trips and the `ssh_config` parser.
 
 ### M4 — Power features
 - Split panes; local, remote and dynamic (SOCKS) port forwarding; ProxyJump; agent forwarding;
