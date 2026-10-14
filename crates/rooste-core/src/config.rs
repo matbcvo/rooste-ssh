@@ -190,11 +190,14 @@ impl Config {
     }
 }
 
-/// `%APPDATA%\rooste-ssh` on Windows, `$XDG_CONFIG_HOME/rooste-ssh` (or
-/// `~/.config/rooste-ssh`) elsewhere.
+/// `%APPDATA%\rooste-ssh` on Windows, `~/Library/Application Support/rooste-ssh`
+/// on macOS, `$XDG_CONFIG_HOME/rooste-ssh` (or `~/.config/rooste-ssh`)
+/// elsewhere.
 fn platform_config_dir() -> Option<PathBuf> {
     let base = if cfg!(windows) {
         std::env::var_os("APPDATA").map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::home_dir().map(|h| h.join("Library").join("Application Support"))
     } else {
         std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)

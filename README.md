@@ -1,6 +1,6 @@
 # Rooste SSH
 
-A fast, memory-safe SSH client for Linux and Windows, written in Rust: tabs and split panes, a
+A fast, memory-safe SSH client for Linux, Windows and macOS, written in Rust: tabs and split panes, a
 session manager, an SFTP file panel, port forwarding, and built-in key tools and agent.
 
 *Rooste* is Estonian for *rust*, the language it's written in.
@@ -75,6 +75,13 @@ Download a release from the [releases page](https://github.com/rooste-ssh/rooste
 | Any Linux | `rooste-ssh.flatpak` | `flatpak install --user rooste-ssh.flatpak` |
 | Any Linux | `rooste-ssh-*-x86_64.AppImage` | Make it executable and run it |
 | Any Linux | `rooste-ssh-*-linux-x86_64.tar.gz` | Plain binaries |
+| macOS, Apple Silicon (experimental) | `rooste-ssh-*-macos-arm64.dmg` | Drag *Rooste SSH* to Applications; see below |
+| macOS, Intel (experimental) | `rooste-ssh-*-macos-x64.dmg` | Drag *Rooste SSH* to Applications; see below |
+
+**macOS builds are new and not yet notarized by Apple.** The first time you open Rooste SSH, macOS
+says it can't verify the developer: open **System Settings → Privacy & Security** and choose
+**Open Anyway** (on older macOS, right-click the app and choose **Open**). Please report anything
+that doesn't work on a Mac.
 
 Every release lists SHA-256 checksums in `SHA256SUMS`. Both programs are included: `rooste` (the
 desktop app) and `rooste-cli` (command line).
@@ -93,10 +100,13 @@ Double-click a saved session to connect. Right-click a session or a tab for more
 | Ctrl + / Ctrl − / Ctrl 0 | Zoom in, out, reset (Ctrl + mouse wheel works too) |
 | Ctrl+Shift+C, Ctrl+Shift+V | Copy, paste (selecting text also copies it) |
 
+On macOS, use ⌘ instead of Ctrl; ⌘C and ⌘V copy and paste.
+
 ### X11 forwarding
 
 Turn on **Forward X11** in a session to show the server's graphical programs on your desktop.
-Linux desktops work as they are. On Windows, run an X server such as VcXsrv or X410 first. The
+Linux desktops work as they are. On Windows, run an X server such as VcXsrv or X410 first; on
+macOS, XQuartz. The
 server only ever receives a random cookie, never your display's real one.
 
 ### Command line
@@ -114,7 +124,8 @@ with `-i`), then answers the server's questions (a password, one-time codes). Ru
 ## Configuration
 
 Settings and saved sessions are stored in `config.toml` in the platform config directory
-(`~/.config/rooste-ssh/` on Linux, `%APPDATA%\rooste-ssh\` on Windows). To run portably,
+(`~/.config/rooste-ssh/` on Linux, `%APPDATA%\rooste-ssh\` on Windows,
+`~/Library/Application Support/rooste-ssh/` on macOS). To run portably,
 for example from a USB stick, put an empty file named `portable` next to the executable; the
 configuration is then kept in `rooste.toml` beside it. Saved passwords go to the system keyring,
 never into the configuration file.

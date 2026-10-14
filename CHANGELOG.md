@@ -4,6 +4,14 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Experimental macOS builds (`.dmg` for Apple Silicon and Intel), not yet notarized. Shortcuts use
+  ⌘ instead of Ctrl, ⌘C and ⌘V copy and paste, and settings are kept in
+  `~/Library/Application Support/rooste-ssh`.
+
 ## [0.1.1] - 2026-10-14
 
 ### Changed
