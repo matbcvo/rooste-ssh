@@ -51,6 +51,8 @@ pub enum TabAction {
     },
     /// The user allowed legacy algorithms for this tab (and its profile).
     EnableLegacy { profile_id: Option<String> },
+    /// The user chose this folder with "Download to…".
+    RememberDownloadFolder(std::path::PathBuf),
 }
 
 #[derive(Debug)]
@@ -81,6 +83,8 @@ pub struct SessionTab {
     /// The SFTP side panel, when shown.
     pub files: Option<FilesPanel>,
     download_dir: std::path::PathBuf,
+    /// The folder last chosen with "Download to…".
+    recent_download_dir: Option<std::path::PathBuf>,
     session: Session,
     host_key: Option<(UnknownHostKey, oneshot::Sender<bool>)>,
     /// Grid size the server was last told about.
@@ -127,6 +131,7 @@ impl SessionTab {
             prompt: None,
             files: None,
             download_dir: crate::theme::download_dir(settings),
+            recent_download_dir: crate::theme::recent_download_dir(settings),
             host_key: None,
             reconnects: 0,
             runtime: runtime.clone(),
@@ -170,20 +175,28 @@ impl SessionTab {
         self.tunnels.clear();
         // The SFTP session belonged to the old connection.
         if self.files.is_some() {
-            self.files = Some(FilesPanel::new(self.download_dir.clone()));
+            self.files = Some(self.new_files_panel());
         }
     }
 
-    /// Show or hide the SFTP file panel.
     /// Connect again after a failure, with a fresh reconnect budget.
     pub fn reconnect(&mut self) {
         self.reconnects = 0;
         self.restart();
     }
 
+    fn new_files_panel(&self) -> FilesPanel {
+        FilesPanel::new(
+            self.download_dir.clone(),
+            self.recent_download_dir.clone(),
+            self.runtime.clone(),
+        )
+    }
+
+    /// Show or hide the SFTP file panel.
     pub fn toggle_files(&mut self) {
         if self.files.take().is_none() {
-            self.files = Some(FilesPanel::new(self.download_dir.clone()));
+            self.files = Some(self.new_files_panel());
             if self.state == TabState::Connected {
                 self.session.send(SessionCommand::OpenFiles);
             }
@@ -243,8 +256,10 @@ impl SessionTab {
         self.terminal.set_scrollback(settings.scrollback_lines);
         self.auto_reconnect = settings.auto_reconnect;
         self.download_dir = crate::theme::download_dir(settings);
+        self.recent_download_dir = crate::theme::recent_download_dir(settings);
         if let Some(files) = &mut self.files {
             files.download_dir = self.download_dir.clone();
+            files.recent_dir = self.recent_download_dir.clone();
         }
     }
 
@@ -467,8 +482,12 @@ impl SessionTab {
             egui::Panel::right(panel_id)
                 .frame(crate::theme::side_panel_frame(ui.ctx()))
                 .resizable(true)
-                .default_size(320.0)
+                .default_size(340.0)
+                .min_size(280.0)
                 .show(ui, |ui| files.ui(ui));
+            if let Some(dir) = files.chosen_dir.take() {
+                self.actions.push(TabAction::RememberDownloadFolder(dir));
+            }
         }
         let out = self.view.show(ui, &mut self.terminal);
         if self.state == TabState::Connected {

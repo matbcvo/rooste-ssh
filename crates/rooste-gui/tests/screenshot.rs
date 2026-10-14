@@ -287,3 +287,94 @@ fn render_failed_tab() {
     std::fs::create_dir_all(&out).unwrap();
     image.save(out.join("failed-tab.png")).unwrap();
 }
+
+/// The SFTP file panel with a few entries, two of them selected.
+#[test]
+#[ignore = "renders with wgpu; run manually to inspect the output"]
+fn render_files_panel() {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use rooste_core::{Config, MemoryStore, Profile};
+    use rooste_gui::RoosteApp;
+    use rooste_testkit::{TEST_PASSWORD, TEST_USER, TestServer};
+
+    let net = tokio::runtime::Runtime::new().unwrap();
+    let server = net.block_on(TestServer::start());
+    let root = server.sftp_root().to_owned();
+    std::fs::create_dir(root.join("logs")).unwrap();
+    for name in ["backup.tar.gz", "notes.txt", "report.pdf"] {
+        std::fs::write(root.join(name), name.repeat(100)).unwrap();
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let known_hosts = dir.path().join("known_hosts");
+    rooste_proto::ssh::known_hosts::learn(
+        &known_hosts,
+        "127.0.0.1",
+        server.addr.port(),
+        &server.host_key,
+    )
+    .unwrap();
+    let live = Profile {
+        name: "Test server".into(),
+        host: "127.0.0.1".into(),
+        port: Some(server.addr.port()),
+        user: TEST_USER.into(),
+        use_agent: false,
+        save_password: true,
+        ..Profile::default()
+    };
+    let config = Config {
+        profiles: vec![live.clone()],
+        ..Config::default()
+    };
+    let app = RoosteApp::with_config(config, None, Arc::new(MemoryStore::default()))
+        .with_known_hosts(known_hosts);
+    app.secrets().set(&live.id, TEST_PASSWORD).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1000.0, 560.0])
+        .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
+    rooste_gui::fonts::install(&harness.ctx);
+    let ctx = harness.ctx.clone();
+    harness.state_mut().connect_profile(&ctx, &live.id);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let listed = |app: &RoosteApp| {
+        app.tabs()
+            .next()
+            .and_then(|t| t.files.as_ref())
+            .is_some_and(|f| f.entries.len() == 4)
+    };
+    while !listed(harness.state()) {
+        assert!(Instant::now() < deadline);
+        if harness
+            .state()
+            .tabs()
+            .any(|t| t.files.is_none() && t.state == rooste_gui::app::TabState::Connected)
+        {
+            harness
+                .state_mut()
+                .tabs_mut()
+                .next()
+                .unwrap()
+                .toggle_files();
+        }
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let files = harness
+        .state_mut()
+        .tabs_mut()
+        .next()
+        .unwrap()
+        .files
+        .as_mut()
+        .unwrap();
+    files.selected = files.entries[1..3].iter().map(|e| e.path.clone()).collect();
+    for _ in 0..5 {
+        harness.step();
+    }
+    let image = harness.render().expect("render with wgpu");
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
+    std::fs::create_dir_all(&out).unwrap();
+    image.save(out.join("files-panel.png")).unwrap();
+}

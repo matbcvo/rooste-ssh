@@ -878,6 +878,13 @@ fn files_entries(app: &RoosteApp) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn files_panel(app: &mut RoosteApp) -> &mut rooste_gui::files::FilesPanel {
+    app.tabs_mut()
+        .next()
+        .and_then(|t| t.files.as_mut())
+        .unwrap()
+}
+
 #[test]
 fn file_panel_browse_transfer_and_manage() {
     let f = Fixture::with_server();
@@ -962,6 +969,80 @@ fn file_panel_browse_transfer_and_manage() {
     click(&mut harness, "Delete");
     wait_for(&mut harness, "delete", |_| {
         !root.join("upload.txt-2").exists()
+    });
+}
+
+#[test]
+fn file_panel_downloads_folders_and_selections_to_a_chosen_folder() {
+    let f = Fixture::with_server();
+    let root = f.server.as_ref().unwrap().sftp_root().to_owned();
+    std::fs::create_dir_all(root.join("logs").join("old")).unwrap();
+    std::fs::write(root.join("logs").join("app.log"), "log line\n").unwrap();
+    std::fs::write(root.join("logs").join("old").join("1.log"), "older\n").unwrap();
+    std::fs::write(root.join("a.txt"), "aaa").unwrap();
+    std::fs::write(root.join("b.txt"), "bbb").unwrap();
+    std::fs::write(root.join("c.txt"), "ccc").unwrap();
+    let downloads = f.dir.path().join("downloads");
+    let chosen = f.dir.path().join("chosen");
+    std::fs::create_dir(&downloads).unwrap();
+    std::fs::create_dir(&chosen).unwrap();
+    let mut config = Config::default();
+    config.settings.download_dir = downloads.display().to_string();
+    config.profiles = vec![Profile {
+        save_password: true,
+        ..f.profile("files")
+    }];
+    let id = config.profiles[0].id.clone();
+    let app = f.app(config);
+    app.secrets().set(&id, TEST_PASSWORD).unwrap();
+    let mut harness = harness(app);
+    context_menu(&mut harness, "files", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+    open_menu_item(&mut harness, "Tab", "Files (SFTP)");
+    wait_for(&mut harness, "listing", |app| files_entries(app).len() == 4);
+
+    // A folder downloads with everything in it.
+    click(&mut harness, "📁 logs");
+    click(&mut harness, "Download");
+    wait_for(&mut harness, "folder download", |_| {
+        std::fs::read_to_string(downloads.join("logs").join("old").join("1.log"))
+            .is_ok_and(|t| t == "older\n")
+            && std::fs::read_to_string(downloads.join("logs").join("app.log"))
+                .is_ok_and(|t| t == "log line\n")
+    });
+
+    // Ctrl-click adds to the selection; "Download to…" asks for a folder.
+    click(&mut harness, "📄 a.txt  (3 B)");
+    last(&harness, "📄 c.txt  (3 B)").click_modifiers(egui::Modifiers::COMMAND);
+    settle(&mut harness);
+    assert_eq!(files_panel(harness.state_mut()).selected.len(), 2);
+    files_panel(harness.state_mut()).picker.fake_answer = Some(chosen.clone());
+    click(&mut harness, "Download to…");
+    wait_for(&mut harness, "download to", |_| {
+        std::fs::read_to_string(chosen.join("a.txt")).is_ok_and(|t| t == "aaa")
+            && std::fs::read_to_string(chosen.join("c.txt")).is_ok_and(|t| t == "ccc")
+    });
+    assert!(!chosen.join("b.txt").exists(), "b.txt was not selected");
+    assert_eq!(
+        f.saved_config().settings.last_download_to,
+        chosen.display().to_string(),
+        "the chosen folder is remembered"
+    );
+
+    // Shift-click selects a range; the remembered folder is in the menu.
+    click(&mut harness, "📄 a.txt  (3 B)");
+    last(&harness, "📄 c.txt  (3 B)").click_modifiers(egui::Modifiers::SHIFT);
+    settle(&mut harness);
+    assert_eq!(files_panel(harness.state_mut()).selected.len(), 3);
+    last(&harness, "📄 b.txt  (3 B)").hover();
+    settle(&mut harness);
+    last(&harness, "📄 b.txt  (3 B)").click_secondary();
+    settle(&mut harness);
+    last(&harness, "Download to chosen").click();
+    settle(&mut harness);
+    wait_for(&mut harness, "download to the remembered folder", |_| {
+        std::fs::read_to_string(chosen.join("b.txt")).is_ok_and(|t| t == "bbb")
+            && chosen.join("a (1).txt").exists()
     });
 }
 

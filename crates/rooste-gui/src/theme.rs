@@ -52,6 +52,12 @@ pub fn apply_to_view(view: &mut TerminalView, settings: &Settings) {
     view.copy_on_select = settings.copy_on_select;
 }
 
+/// The folder last chosen with "Download to…", if any.
+pub fn recent_download_dir(settings: &Settings) -> Option<std::path::PathBuf> {
+    let dir = settings.last_download_to.trim();
+    (!dir.is_empty()).then(|| rooste_core::expand_tilde(dir))
+}
+
 /// Where SFTP downloads are saved.
 pub fn download_dir(settings: &Settings) -> std::path::PathBuf {
     if settings.download_dir.trim().is_empty() {

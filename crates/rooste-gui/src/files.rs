@@ -7,6 +7,8 @@ use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 
 use egui::{RichText, Ui};
+
+use crate::picker::{PickId, PickKind, Picker};
 use rooste_sftp::{Entry, Sftp, format_size};
 use tokio::sync::mpsc;
 
@@ -14,6 +16,12 @@ use tokio::sync::mpsc;
 pub enum FilesCommand {
     List(String),
     Download {
+        id: u64,
+        remote: String,
+        local: PathBuf,
+    },
+    /// Download a folder and everything in it into a new local folder.
+    DownloadTree {
         id: u64,
         remote: String,
         local: PathBuf,
@@ -111,6 +119,17 @@ pub fn spawn(sftp: Sftp, home: String, wake: Arc<dyn Fn() + Send + Sync>) -> Fil
                         result: result.map(drop).map_err(|e| e.to_string()),
                     });
                 }
+                FilesCommand::DownloadTree { id, remote, local } => {
+                    let result = download_tree(&sftp, &remote, &local, |done, total| {
+                        send(FilesEvent::Progress { id, done, total });
+                        !is_cancelled
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .contains(&id)
+                    })
+                    .await;
+                    send(FilesEvent::Finished { id, result });
+                }
                 FilesCommand::Upload { id, local, remote } => {
                     let result = sftp
                         .upload(&local, &remote, |done, total| {
@@ -156,6 +175,63 @@ pub fn spawn(sftp: Sftp, home: String, wake: Arc<dyn Fn() + Send + Sync>) -> Fil
     }
 }
 
+/// Download the remote folder `remote` into `local` (created), with all
+/// its files and subfolders. Progress counts bytes over all files; it
+/// returns false to cancel.
+async fn download_tree(
+    sftp: &Sftp,
+    remote: &str,
+    local: &Path,
+    mut progress: impl FnMut(u64, u64) -> bool,
+) -> Result<(), String> {
+    // Find every file first, so progress has a total.
+    let mut dirs = vec![(remote.to_owned(), local.to_owned())];
+    let mut files = Vec::new();
+    let mut next = 0;
+    while let Some((dir, target)) = dirs.get(next).cloned() {
+        next += 1;
+        tokio::fs::create_dir_all(&target)
+            .await
+            .map_err(|e| format!("{}: {e}", target.display()))?;
+        for entry in sftp.list(&dir).await.map_err(|e| format!("{dir}: {e}"))? {
+            let to = target.join(&entry.name);
+            if entry.is_dir() {
+                dirs.push((entry.path, to));
+            } else {
+                files.push((entry.path, to, entry.size));
+            }
+        }
+    }
+    let total: u64 = files.iter().map(|(_, _, size)| size).sum();
+    let count = files.len();
+    let mut finished = 0;
+    let mut failed = Vec::new();
+    for (remote, local, size) in files {
+        let mut keep_going = true;
+        let result = sftp
+            .download(&remote, &local, |done, _| {
+                keep_going = progress(finished + done, total);
+                keep_going
+            })
+            .await;
+        if !keep_going {
+            return Err("cancelled".into());
+        }
+        if let Err(e) = result {
+            failed.push(format!("{remote}: {e}"));
+        }
+        finished += size;
+    }
+    progress(total, total);
+    match failed.first() {
+        None => Ok(()),
+        Some(first) => Err(format!(
+            "{} of {count} files failed, first: {first}",
+            failed.len()
+        )),
+    }
+}
+
 fn report(send: &impl Fn(FilesEvent), path: &str, result: Result<(), rooste_sftp::SftpError>) {
     match result {
         Ok(()) => send(FilesEvent::Changed {
@@ -198,31 +274,59 @@ enum Edit {
     Delete(Entry),
 }
 
+/// Picked from an entry's right-click menu.
+enum MenuAction {
+    Open(String),
+    Download,
+    DownloadTo,
+    DownloadInto(PathBuf),
+}
+
 /// State of the file panel in a tab.
 #[derive(Debug)]
 pub struct FilesPanel {
     pub handle: Option<FilesHandle>,
     pub cwd: String,
     pub entries: Vec<Entry>,
-    pub selected: Option<String>,
+    /// Paths of the selected entries, in the order they were selected.
+    pub selected: Vec<String>,
+    /// Where Shift-click selection ranges start.
+    anchor: Option<String>,
     pub transfers: Vec<Transfer>,
     pub error: Option<String>,
     pub download_dir: PathBuf,
+    /// The folder last chosen with "Download to…".
+    pub recent_dir: Option<PathBuf>,
+    /// A folder newly chosen with "Download to…", for the app to remember.
+    pub chosen_dir: Option<PathBuf>,
+    /// Folder dialogs for "Download to…".
+    pub picker: Picker,
+    /// Entries waiting for the "Download to…" dialog.
+    pending_download: Vec<Entry>,
     path_input: String,
     edit: Option<Edit>,
     next_id: u64,
 }
 
 impl FilesPanel {
-    pub fn new(download_dir: PathBuf) -> Self {
+    pub fn new(
+        download_dir: PathBuf,
+        recent_dir: Option<PathBuf>,
+        runtime: tokio::runtime::Handle,
+    ) -> Self {
         Self {
             handle: None,
             cwd: String::new(),
             entries: Vec::new(),
-            selected: None,
+            selected: Vec::new(),
+            anchor: None,
             transfers: Vec::new(),
             error: None,
             download_dir,
+            recent_dir,
+            chosen_dir: None,
+            picker: Picker::new(runtime),
+            pending_download: Vec::new(),
             path_input: String::new(),
             edit: None,
             next_id: 0,
@@ -241,24 +345,87 @@ impl FilesPanel {
         }
     }
 
+    /// Download a file or folder to the download folder.
     pub fn download(&mut self, entry: &Entry) {
+        let dir = self.download_dir.clone();
+        self.download_into(entry, &dir);
+    }
+
+    /// Download a file, or a folder with everything in it, into `dir`.
+    pub fn download_into(&mut self, entry: &Entry, dir: &Path) {
         let Some(handle) = &self.handle else { return };
         self.next_id += 1;
-        let local = unique_path(&self.download_dir, &entry.name);
-        handle.send(FilesCommand::Download {
-            id: self.next_id,
-            remote: entry.path.clone(),
-            local: local.clone(),
-        });
+        let id = self.next_id;
+        let local = unique_path(dir, &entry.name);
+        let remote = entry.path.clone();
+        let (command, name, total) = if entry.is_dir() {
+            let command = FilesCommand::DownloadTree {
+                id,
+                remote,
+                local: local.clone(),
+            };
+            (command, format!("{}/", entry.name), 0)
+        } else {
+            let command = FilesCommand::Download {
+                id,
+                remote,
+                local: local.clone(),
+            };
+            (command, entry.name.clone(), entry.size)
+        };
+        handle.send(command);
         self.transfers.push(Transfer {
-            id: self.next_id,
-            name: entry.name.clone(),
+            id,
+            name,
             direction: Direction::Download,
             done: 0,
-            total: entry.size,
+            total,
             state: TransferState::Running,
             local,
         });
+    }
+
+    fn download_selected_into(&mut self, dir: &Path) {
+        for entry in self.selected_entries() {
+            self.download_into(&entry, dir);
+        }
+    }
+
+    /// Ask for a folder, then download the selection into it.
+    fn download_selected_to(&mut self, ctx: &egui::Context) {
+        self.pending_download = self.selected_entries();
+        let start = self.recent_dir.as_ref().unwrap_or(&self.download_dir);
+        let start = start.display().to_string();
+        self.picker
+            .open(ctx, PickId::DownloadTo, PickKind::Folder, &start);
+    }
+
+    /// Select one entry, or toggle it (Ctrl) or select a range (Shift).
+    fn click_entry(&mut self, index: usize, modifiers: egui::Modifiers) {
+        let Some(path) = self.entries.get(index).map(|e| e.path.clone()) else {
+            return;
+        };
+        let anchor = self
+            .anchor
+            .as_ref()
+            .and_then(|a| self.entries.iter().position(|e| &e.path == a));
+        if modifiers.command {
+            if let Some(i) = self.selected.iter().position(|p| *p == path) {
+                self.selected.remove(i);
+            } else {
+                self.selected.push(path.clone());
+            }
+            self.anchor = Some(path);
+        } else if let (true, Some(anchor)) = (modifiers.shift, anchor) {
+            let (from, to) = (anchor.min(index), anchor.max(index));
+            self.selected = self.entries[from..=to]
+                .iter()
+                .map(|e| e.path.clone())
+                .collect();
+        } else {
+            self.selected = vec![path.clone()];
+            self.anchor = Some(path);
+        }
     }
 
     pub fn upload(&mut self, local: &Path) {
@@ -296,7 +463,8 @@ impl FilesPanel {
                     self.path_input = path.clone();
                     self.cwd = path;
                     self.entries = entries;
-                    self.selected = None;
+                    self.selected.clear();
+                    self.anchor = None;
                     self.error = None;
                 }
                 FilesEvent::Progress { id, done, total } => {
@@ -340,6 +508,14 @@ impl FilesPanel {
         for path in dropped {
             self.upload(&path);
         }
+        self.picker.poll();
+        if let Some(dir) = self.picker.take(PickId::DownloadTo) {
+            for entry in std::mem::take(&mut self.pending_download) {
+                self.download_into(&entry, &dir);
+            }
+            self.recent_dir = Some(dir.clone());
+            self.chosen_dir = Some(dir);
+        }
 
         ui.horizontal(|ui| {
             if ui.button("⬆").on_hover_text("Parent folder").clicked() {
@@ -363,27 +539,35 @@ impl FilesPanel {
                 self.open(&target);
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("New folder").clicked() {
                 self.edit = Some(Edit::NewFolder(String::new()));
             }
-            let selected = self.selected_entry().cloned();
-            match &selected {
-                Some(entry) if entry.is_dir() => {
-                    if ui.button("Open").clicked() {
-                        let path = entry.path.clone();
-                        self.open(&path);
-                    }
-                }
-                _ => {
-                    if ui
-                        .add_enabled(selected.is_some(), egui::Button::new("Download"))
-                        .clicked()
-                        && let Some(entry) = &selected
-                    {
-                        self.download(entry);
-                    }
-                }
+            let selected = self.single_selected();
+            let any_selected = !self.selected.is_empty();
+            if let Some(entry) = selected.as_ref().filter(|e| e.is_dir())
+                && ui.button("Open").clicked()
+            {
+                let path = entry.path.clone();
+                self.open(&path);
+            }
+            if ui
+                .add_enabled(any_selected, egui::Button::new("Download"))
+                .on_hover_text("Download to the download folder")
+                .clicked()
+            {
+                let dir = self.download_dir.clone();
+                self.download_selected_into(&dir);
+            }
+            if ui
+                .add_enabled(
+                    any_selected && !self.picker.is_busy(),
+                    egui::Button::new("Download to…"),
+                )
+                .on_hover_text("Choose a folder to download to")
+                .clicked()
+            {
+                self.download_selected_to(ui.ctx());
             }
             if ui
                 .add_enabled(selected.is_some(), egui::Button::new("Rename"))
@@ -411,6 +595,12 @@ impl FilesPanel {
 
         let mut open = None;
         let mut download = None;
+        let mut clicked = None;
+        let mut menu = None;
+        let recent = self
+            .recent_dir
+            .clone()
+            .filter(|dir| *dir != self.download_dir);
         egui::ScrollArea::vertical()
             .max_height((ui.available_height() - 90.0).max(80.0))
             .auto_shrink([false, true])
@@ -418,9 +608,9 @@ impl FilesPanel {
                 if self.entries.is_empty() {
                     ui.weak("Empty folder");
                 }
-                for entry in &self.entries {
+                for (index, entry) in self.entries.iter().enumerate() {
                     let icon = if entry.is_dir() { "📁" } else { "📄" };
-                    let selected = self.selected.as_deref() == Some(entry.path.as_str());
+                    let selected = self.selected.contains(&entry.path);
                     let label = if entry.is_dir() {
                         format!("{icon} {}", entry.name)
                     } else {
@@ -428,7 +618,11 @@ impl FilesPanel {
                     };
                     let response = ui.selectable_label(selected, label);
                     if response.clicked() {
-                        self.selected = Some(entry.path.clone());
+                        clicked = Some((index, ui.input(|i| i.modifiers)));
+                    }
+                    // Right-clicking outside the selection selects just that entry.
+                    if response.secondary_clicked() && !selected {
+                        clicked = Some((index, egui::Modifiers::NONE));
                     }
                     if response.double_clicked() {
                         if entry.is_dir() {
@@ -438,28 +632,58 @@ impl FilesPanel {
                         }
                     }
                     response.context_menu(|ui| {
-                        if entry.is_dir() {
-                            if ui.button("Open").clicked() {
-                                open = Some(entry.path.clone());
+                        if entry.is_dir() && ui.button("Open").clicked() {
+                            menu = Some(MenuAction::Open(entry.path.clone()));
+                            ui.close();
+                        }
+                        if ui.button("Download").clicked() {
+                            menu = Some(MenuAction::Download);
+                            ui.close();
+                        }
+                        if ui.button("Download to…").clicked() {
+                            menu = Some(MenuAction::DownloadTo);
+                            ui.close();
+                        }
+                        if let Some(dir) = &recent {
+                            let name = dir.file_name().map_or_else(
+                                || dir.display().to_string(),
+                                |n| n.to_string_lossy().into_owned(),
+                            );
+                            if ui
+                                .button(format!("Download to {name}"))
+                                .on_hover_text(dir.display().to_string())
+                                .clicked()
+                            {
+                                menu = Some(MenuAction::DownloadInto(dir.clone()));
                                 ui.close();
                             }
-                        } else if ui.button("Download").clicked() {
-                            download = Some(entry.clone());
-                            ui.close();
                         }
                     });
                 }
             });
+        if let Some((index, modifiers)) = clicked {
+            self.click_entry(index, modifiers);
+        }
         if let Some(path) = open {
             self.open(&path);
         }
         if let Some(entry) = download {
             self.download(&entry);
         }
+        match menu {
+            Some(MenuAction::Open(path)) => self.open(&path),
+            Some(MenuAction::Download) => {
+                let dir = self.download_dir.clone();
+                self.download_selected_into(&dir);
+            }
+            Some(MenuAction::DownloadTo) => self.download_selected_to(ui.ctx()),
+            Some(MenuAction::DownloadInto(dir)) => self.download_selected_into(&dir),
+            None => {}
+        }
 
         ui.separator();
         ui.weak(format!(
-            "Drop files here to upload. Downloads go to {}.",
+            "Drop files here to upload. Ctrl- or Shift-click to select several. Downloads go to {}.",
             self.download_dir.display()
         ));
         let mut cancel = None;
@@ -500,9 +724,21 @@ impl FilesPanel {
         }
     }
 
-    fn selected_entry(&self) -> Option<&Entry> {
-        let selected = self.selected.as_deref()?;
-        self.entries.iter().find(|e| e.path == selected)
+    /// The selected entries, in listing order.
+    fn selected_entries(&self) -> Vec<Entry> {
+        self.entries
+            .iter()
+            .filter(|e| self.selected.contains(&e.path))
+            .cloned()
+            .collect()
+    }
+
+    /// The only selected entry, if exactly one is selected.
+    fn single_selected(&self) -> Option<Entry> {
+        match self.selected_entries().as_slice() {
+            [entry] => Some(entry.clone()),
+            _ => None,
+        }
     }
 
     fn edit_ui(&mut self, ui: &mut Ui) {
