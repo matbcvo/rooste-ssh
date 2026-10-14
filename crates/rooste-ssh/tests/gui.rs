@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use rooste_core::{Config, MemoryStore, Profile, Theme};
-use rooste_gui::RoosteApp;
-use rooste_gui::app::{Dialog, TabState};
-use rooste_gui::session::PromptKind;
-use rooste_gui::tab::SessionTab;
 use rooste_protocols::ssh::known_hosts;
+use rooste_ssh::RoosteApp;
+use rooste_ssh::app::{Dialog, TabState};
+use rooste_ssh::session::PromptKind;
+use rooste_ssh::tab::SessionTab;
 use rooste_testkit::{TEST_CODE, TEST_PASSWORD, TEST_USER, TestServer};
 use tempfile::TempDir;
 
@@ -442,7 +442,7 @@ fn import_from_ssh_config_and_putty() {
 
     let app = f
         .app(Config::default())
-        .with_import_sources(rooste_gui::app::ImportSources {
+        .with_import_sources(rooste_ssh::app::ImportSources {
             putty_dir: Some(putty),
             ssh_config: Some(ssh_config),
         });
@@ -1228,7 +1228,7 @@ fn files_entries(app: &RoosteApp) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn files_panel(app: &mut RoosteApp) -> &mut rooste_gui::files::FilesPanel {
+fn files_panel(app: &mut RoosteApp) -> &mut rooste_ssh::files::FilesPanel {
     app.tabs_mut()
         .next()
         .and_then(|t| t.files.as_mut())

@@ -58,7 +58,7 @@ crates/
 ├─ rooste-terminal/   alacritty_terminal wrapper: input encoding, selection, scrollback
 ├─ rooste-keys/       key generation, .ppk import/export, agent client/server
 ├─ rooste-sftp/       SFTP operations, transfer queue
-├─ rooste-gui/        egui app (binary `rooste`): tabs, splits, session manager, settings
+├─ rooste-ssh/        egui app (binary `rooste`): tabs, splits, session manager, settings
 ├─ rooste-cli/        headless client
 └─ rooste-testkit/    shared test fixtures
 ```
@@ -97,7 +97,7 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
 - **Tests required:** `insta` snapshot tests of the grid; regression suite from `vttest`/`esctest`
   cases; manual check with full-screen programs. Done: conformance suite in
   `crates/rooste-terminal/tests`, kittest GUI tests, and an opt-in screenshot test
-  (`cargo test -p rooste-gui --test screenshot -- --ignored`).
+  (`cargo test -p rooste-ssh --test screenshot -- --ignored`).
 
 ### M3 — First usable app (MVP) ✅
 - Session manager with saved profiles.

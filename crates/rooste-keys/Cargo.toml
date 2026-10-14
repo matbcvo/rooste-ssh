@@ -1,13 +1,16 @@
 [package]
 name = "rooste-keys"
-description = "Key generation, .ppk import/export and SSH agent support"
+description = "Internal crate of Rooste SSH: key generation, .ppk import/export and an SSH agent. Not a stable API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-publish = false
+homepage.workspace = true
+readme = "../../README.md"
+keywords = ["ssh", "ssh-agent", "putty", "keys"]
+categories = ["cryptography"]
 
 [dependencies]
 aes.workspace = true

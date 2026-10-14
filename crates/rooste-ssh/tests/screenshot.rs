@@ -3,13 +3,13 @@
 //! part of the default test run:
 //!
 //! ```text
-//! cargo test -p rooste-gui --test screenshot -- --ignored
+//! cargo test -p rooste-ssh --test screenshot -- --ignored
 //! ```
 
 use std::path::PathBuf;
 
 use egui_kittest::Harness;
-use rooste_gui::terminal_view::TerminalView;
+use rooste_ssh::terminal_view::TerminalView;
 use rooste_terminal::Terminal;
 
 fn demo() -> String {
@@ -45,7 +45,7 @@ fn render_terminal() {
         },
         state,
     );
-    rooste_gui::fonts::install(&harness.ctx);
+    rooste_ssh::fonts::install(&harness.ctx);
     harness.run();
     // Re-feed after the widget sized the grid to the window.
     let (terminal, _) = harness.state_mut();
@@ -93,7 +93,7 @@ fn render_app() {
     use std::time::{Duration, Instant};
 
     use rooste_core::{Config, MemoryStore, Profile};
-    use rooste_gui::RoosteApp;
+    use rooste_ssh::RoosteApp;
     use rooste_testkit::{TEST_PASSWORD, TEST_USER, TestServer};
 
     let net = tokio::runtime::Runtime::new().unwrap();
@@ -140,7 +140,7 @@ fn render_app() {
     let mut harness = Harness::builder()
         .with_size([1000.0, 560.0])
         .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
-    rooste_gui::fonts::install(&harness.ctx);
+    rooste_ssh::fonts::install(&harness.ctx);
     let ctx = harness.ctx.clone();
     harness.state_mut().connect_profile(&ctx, &live.id);
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -174,7 +174,7 @@ fn render_dialogs() {
 
     use egui_kittest::kittest::Queryable;
     use rooste_core::{Config, MemoryStore, Profile};
-    use rooste_gui::RoosteApp;
+    use rooste_ssh::RoosteApp;
 
     let p = |name: &str, folder: &str| Profile {
         name: name.into(),
@@ -209,7 +209,7 @@ fn render_dialogs() {
         }
         let mut app = RoosteApp::with_config(config, None, Arc::new(MemoryStore::default()));
         if name == "update-banner" {
-            app.update_banner = Some(rooste_gui::update::Release {
+            app.update_banner = Some(rooste_ssh::update::Release {
                 version: "0.2.0".into(),
                 url: "https://example.com".into(),
                 download: "https://example.com".into(),
@@ -218,7 +218,7 @@ fn render_dialogs() {
         let mut harness = Harness::builder()
             .with_size([1000.0, 640.0])
             .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
-        rooste_gui::fonts::install(&harness.ctx);
+        rooste_ssh::fonts::install(&harness.ctx);
         harness.run();
         for label in clicks {
             harness.get_by_label(label).click();
@@ -238,7 +238,7 @@ fn render_failed_tab() {
 
     use egui_kittest::kittest::Queryable;
     use rooste_core::{Config, MemoryStore};
-    use rooste_gui::RoosteApp;
+    use rooste_ssh::RoosteApp;
     use rooste_testkit::{TEST_USER, TestServer};
 
     let net = tokio::runtime::Runtime::new().unwrap();
@@ -270,7 +270,7 @@ fn render_failed_tab() {
     let mut harness = Harness::builder()
         .with_size([1000.0, 640.0])
         .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
-    rooste_gui::fonts::install(&harness.ctx);
+    rooste_ssh::fonts::install(&harness.ctx);
     harness.run();
     harness.get_by_label("Connect").hover();
     harness.run();
@@ -309,7 +309,7 @@ fn render_files_panel() {
     use std::time::{Duration, Instant};
 
     use rooste_core::{Config, MemoryStore, Profile};
-    use rooste_gui::RoosteApp;
+    use rooste_ssh::RoosteApp;
     use rooste_testkit::{TEST_PASSWORD, TEST_USER, TestServer};
 
     let net = tokio::runtime::Runtime::new().unwrap();
@@ -347,7 +347,7 @@ fn render_files_panel() {
     let mut harness = Harness::builder()
         .with_size([1000.0, 560.0])
         .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
-    rooste_gui::fonts::install(&harness.ctx);
+    rooste_ssh::fonts::install(&harness.ctx);
     let ctx = harness.ctx.clone();
     harness.state_mut().connect_profile(&ctx, &live.id);
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -362,7 +362,7 @@ fn render_files_panel() {
         if harness
             .state()
             .tabs()
-            .any(|t| t.files.is_none() && t.state == rooste_gui::app::TabState::Connected)
+            .any(|t| t.files.is_none() && t.state == rooste_ssh::app::TabState::Connected)
         {
             harness
                 .state_mut()
@@ -403,8 +403,8 @@ fn render_readme() {
 
     use egui_kittest::kittest::Queryable;
     use rooste_core::{Config, MemoryStore, Profile, Theme, Tunnel, TunnelKind};
-    use rooste_gui::RoosteApp;
-    use rooste_gui::app::TabState;
+    use rooste_ssh::RoosteApp;
+    use rooste_ssh::app::TabState;
     use rooste_testkit::{TEST_PASSWORD, TEST_USER, TestServer};
 
     const PROMPT_WEB: &str = "\x1b[1;32mdeploy@web-1\x1b[0m:\x1b[1;34m~\x1b[0m$ ";
@@ -530,7 +530,7 @@ fn render_readme() {
             let mut harness = Harness::builder()
                 .with_size([width, height])
                 .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
-            rooste_gui::fonts::install(&harness.ctx);
+            rooste_ssh::fonts::install(&harness.ctx);
             let ctx = harness.ctx.clone();
             harness.state_mut().connect_profile(&ctx, &live.id);
             wait(&mut harness, |app| {
@@ -573,7 +573,7 @@ fn render_readme() {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
-    let fill = |tab: &mut rooste_gui::tab::SessionTab, text: &str| {
+    let fill = |tab: &mut rooste_ssh::tab::SessionTab, text: &str| {
         tab.terminal.advance(b"\x1b[2J\x1b[H");
         tab.terminal.advance(text.as_bytes());
     };
@@ -717,7 +717,7 @@ fn render_readme() {
         harness.step();
         harness.get_by_label("Key generator…").click();
         harness.step();
-        if let Some(rooste_gui::app::Dialog::KeyGenerator(generator)) =
+        if let Some(rooste_ssh::app::Dialog::KeyGenerator(generator)) =
             &mut harness.state_mut().dialog
         {
             generator.comment = "deploy@laptop".into();

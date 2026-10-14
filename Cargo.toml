@@ -8,14 +8,18 @@ edition = "2024"
 rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/rooste-ssh/rooste-ssh"
+homepage = "https://github.com/rooste-ssh/rooste-ssh"
 authors = ["Martin Vooremäe"]
 
 [workspace.dependencies]
-rooste-core = { path = "crates/rooste-core" }
-rooste-protocols = { path = "crates/rooste-protocols" }
-rooste-terminal = { path = "crates/rooste-terminal" }
-rooste-keys = { path = "crates/rooste-keys" }
-rooste-sftp = { path = "crates/rooste-sftp" }
+# The internal crates are published to crates.io together with the app; keep
+# these versions equal to the workspace version above.
+rooste-core = { path = "crates/rooste-core", version = "=0.2.0" }
+rooste-protocols = { path = "crates/rooste-protocols", version = "=0.2.0" }
+rooste-terminal = { path = "crates/rooste-terminal", version = "=0.2.0" }
+rooste-keys = { path = "crates/rooste-keys", version = "=0.2.0" }
+rooste-sftp = { path = "crates/rooste-sftp", version = "=0.2.0" }
+# Test fixtures only; not published.
 rooste-testkit = { path = "crates/rooste-testkit" }
 
 alacritty_terminal = { version = "0.26.0", default-features = false }

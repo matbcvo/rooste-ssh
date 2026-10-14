@@ -1,13 +1,16 @@
 [package]
 name = "rooste-cli"
-description = "Headless Rooste SSH client for testing and scripting"
+description = "Command-line SSH client from the Rooste SSH project: interactive shells, commands, port forwarding and jump hosts."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-publish = false
+homepage.workspace = true
+readme = "../../README.md"
+keywords = ["ssh", "ssh-client", "cli", "port-forwarding"]
+categories = ["network-programming", "command-line-utilities"]
 
 [dependencies]
 anyhow.workspace = true
@@ -22,3 +25,15 @@ tokio.workspace = true
 
 [lints]
 workspace = true
+
+# `cargo binstall` downloads the release archives instead of compiling.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/rooste-ssh-{ version }-linux-x86_64.tar.gz"
+bin-dir = "rooste-ssh-{ version }-linux-x86_64/{ bin }"
+pkg-fmt = "tgz"
+disabled-strategies = ["quick-install"]
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/rooste-ssh-{ version }-windows-x64-portable.zip"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "zip"

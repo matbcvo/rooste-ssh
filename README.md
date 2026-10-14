@@ -83,6 +83,10 @@ says it can't verify the developer: open **System Settings → Privacy & Securit
 **Open Anyway** (on older macOS, right-click the app and choose **Open**). Please report anything
 that doesn't work on a Mac.
 
+With Rust installed, you can also install from [crates.io](https://crates.io/crates/rooste-ssh):
+`cargo install rooste-ssh` (the desktop app) and `cargo install rooste-cli`. `cargo binstall
+rooste-ssh` downloads the release binaries instead of compiling.
+
 Every release lists SHA-256 checksums in `SHA256SUMS`. Both programs are included: `rooste` (the
 desktop app) and `rooste-cli` (command line).
 
@@ -137,7 +141,7 @@ Requires Rust 1.95 or newer. On Linux the desktop app needs the usual X11 or Way
 
 ```sh
 cargo build --release
-cargo run -p rooste-gui              # desktop app (binary: rooste)
+cargo run -p rooste-ssh              # desktop app (binary: rooste)
 cargo run -p rooste-cli -- user@host
 ```
 

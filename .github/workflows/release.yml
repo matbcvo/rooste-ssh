@@ -11,7 +11,7 @@ on:
       - packaging/**
       - about.toml
       - .github/workflows/release.yml
-      - crates/rooste-gui/Cargo.toml
+      - crates/rooste-ssh/Cargo.toml
 
 permissions:
   contents: read
@@ -59,10 +59,10 @@ jobs:
           tool: cargo-packager,cargo-generate-rpm
       - name: Version
         id: version
-        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-gui") | .version')" >> "$GITHUB_OUTPUT"
-      - run: cargo build --release -p rooste-gui -p rooste-cli
-      - run: cargo packager --release -p rooste-gui --formats deb,appimage
-      - run: cargo generate-rpm -p crates/rooste-gui -o target/packages/
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-ssh") | .version')" >> "$GITHUB_OUTPUT"
+      - run: cargo build --release -p rooste-ssh -p rooste-cli
+      - run: cargo packager --release -p rooste-ssh --formats deb,appimage
+      - run: cargo generate-rpm -p crates/rooste-ssh -o target/packages/
       - name: Consistent file names
         run: |
           v=${{ steps.version.outputs.version }}
@@ -145,15 +145,15 @@ jobs:
           tool: cargo-packager
       - name: Version
         id: version
-        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-gui") | .version')" >> "$GITHUB_OUTPUT"
-      - run: cargo build --release -p rooste-gui -p rooste-cli --target ${{ matrix.target }}
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-ssh") | .version')" >> "$GITHUB_OUTPUT"
+      - run: cargo build --release -p rooste-ssh -p rooste-cli --target ${{ matrix.target }}
       # cargo-packager reads the binaries from target/release.
       - name: Stage the binaries
         run: |
           mkdir -p target/release
           cp target/${{ matrix.target }}/release/rooste target/${{ matrix.target }}/release/rooste-cli target/release/
           file target/release/rooste
-      - run: cargo packager --release -p rooste-gui --formats app
+      - run: cargo packager --release -p rooste-ssh --formats app
       # Without a signature, macOS calls downloaded Apple Silicon apps
       # "damaged". An ad-hoc signature is free; notarization is not.
       - name: Ad-hoc sign the app
@@ -208,8 +208,8 @@ jobs:
       - name: Version
         id: version
         shell: bash
-        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-gui") | .version')" >> "$GITHUB_OUTPUT"
-      - run: cargo build --release -p rooste-gui -p rooste-cli
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-ssh") | .version')" >> "$GITHUB_OUTPUT"
+      - run: cargo build --release -p rooste-ssh -p rooste-cli
       - name: Sign executables
         if: env.HAS_CERTIFICATE == 'true'
         env:
@@ -220,7 +220,7 @@ jobs:
           [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
           $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
           & $signtool sign /f "$env:RUNNER_TEMP\cert.pfx" /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 target\release\rooste.exe target\release\rooste-cli.exe
-      - run: cargo packager --release -p rooste-gui --formats wix
+      - run: cargo packager --release -p rooste-ssh --formats wix
       - name: Consistent file name
         shell: pwsh
         run: |
@@ -339,7 +339,7 @@ jobs:
           path: artifacts
       - name: Check the tag matches the version
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-gui") | .version')
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-ssh") | .version')
           test "${GITHUB_REF_NAME}" = "v${version}" || { echo "tag ${GITHUB_REF_NAME} != v${version}"; exit 1; }
       - name: Collect files and checksums
         run: |
@@ -367,3 +367,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${GITHUB_REF_NAME}" release/* --title "Rooste SSH ${GITHUB_REF_NAME#v}" --notes-file notes.md --generate-notes
+
+  # Needs the crates to exist on crates.io and trusted publishing set up for
+  # each of them (crates.io → crate → Settings → Trusted Publishing, this
+  # repository and release.yml); then set the repository variable
+  # CRATES_IO_TRUSTED_PUBLISHING to "true".
+  crates-io:
+    name: Publish to crates.io
+    if: startsWith(github.ref, 'refs/tags/v') && vars.CRATES_IO_TRUSTED_PUBLISHING == 'true'
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cargo publish --workspace
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

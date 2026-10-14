@@ -4,6 +4,15 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Published on crates.io: `cargo install rooste-ssh` and `cargo install rooste-cli` (or
+  `cargo binstall` for the release binaries). The app's package is now named `rooste-ssh`.
+- Right-click menus in the session list (new session, quick connect, imports; a new session in
+  a folder), and a centered Connect button on the welcome screen.
+
 ## [0.2.0] - 2026-10-14
 
 ### Added

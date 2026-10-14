@@ -45,7 +45,7 @@ reviews:
         handling (no `unwrap` on input from the network, files or users), and
         clear names. New behavior needs tests: protocol code against the
         in-process test server in rooste-testkit, UI changes with an
-        egui_kittest test in crates/rooste-gui/tests/gui.rs.
+        egui_kittest test in crates/rooste-ssh/tests/gui.rs.
     - path: "crates/rooste-protocols/**"
       instructions: |
         Security-sensitive: SSH connections, host-key checking, authentication,
@@ -61,7 +61,7 @@ reviews:
         key material handling (no logging, zeroized buffers), private key
         files written with owner-only permissions, and correct parsing of
         untrusted key files without panics.
-    - path: "crates/rooste-gui/**"
+    - path: "crates/rooste-ssh/**"
       instructions: |
         egui desktop app. Widget IDs must be stable (egui_tiles moves panes in
         memory, so never derive IDs from addresses). Long work (network, file
