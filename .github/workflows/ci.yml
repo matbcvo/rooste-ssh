@@ -74,7 +74,7 @@ jobs:
               sleep 1
             done
           done
-      - run: cargo nextest run --workspace --profile ci --run-ignored only -E 'not binary(screenshot) and not binary(interop)'
+      - run: cargo nextest run --workspace --profile ci --run-ignored only -E 'not binary(screenshot) and not binary(interop) and not test(github_https)'
         env:
           ROOSTE_TEST_SSH_ADDR: 127.0.0.1:2222
           ROOSTE_TEST_TELNET_ADDR: 127.0.0.1:2323
@@ -113,7 +113,7 @@ jobs:
           Copy-Item crates/rooste-testkit/docker/authorized_keys $keys
           icacls $keys /inheritance:r /grant "*S-1-5-32-544:F" /grant "SYSTEM:F"
           Restart-Service sshd
-      - run: cargo nextest run --workspace --profile ci --run-ignored only -E 'not binary(screenshot) and not binary(interop) and not test(busybox_telnetd)'
+      - run: cargo nextest run --workspace --profile ci --run-ignored only -E 'not binary(screenshot) and not binary(interop) and not test(busybox_telnetd) and not test(github_https)'
       - name: OpenSSH logs
         if: failure()
         shell: pwsh

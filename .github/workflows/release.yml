@@ -1,0 +1,279 @@
+name: Release
+
+# Tags `v*` build, smoke-test and publish a release. Manual runs and pull
+# requests that touch packaging do everything except publishing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - packaging/**
+      - about.toml
+      - .github/workflows/release.yml
+      - crates/rooste-gui/Cargo.toml
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # linuxdeploy (AppImage) runs without FUSE on CI machines.
+  APPIMAGE_EXTRACT_AND_RUN: "1"
+
+jobs:
+  notices:
+    name: Third-party notices
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+      - run: |
+          mkdir -p target/notices
+          cargo about generate -o target/notices/THIRD-PARTY-LICENSES.html packaging/about.hbs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: notices
+          path: target/notices/THIRD-PARTY-LICENSES.html
+
+  linux:
+    name: Linux packages
+    needs: notices
+    # The oldest supported runner, so the binaries run on older distributions.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: notices
+          path: target/notices
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager,cargo-generate-rpm
+      - name: Version
+        id: version
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-gui") | .version')" >> "$GITHUB_OUTPUT"
+      - run: cargo build --release -p rooste-gui -p rooste-cli
+      - run: cargo packager --release -p rooste-gui --formats deb,appimage
+      - run: cargo generate-rpm -p crates/rooste-gui -o target/packages/
+      - name: Consistent file names
+        run: |
+          v=${{ steps.version.outputs.version }}
+          cd target/packages
+          mv rooste_${v}_amd64.deb rooste-ssh-${v}-amd64.deb
+          mv rooste_${v}_x86_64.AppImage rooste-ssh-${v}-x86_64.AppImage
+          ls -la
+      - name: Tarball
+        run: |
+          name=rooste-ssh-${{ steps.version.outputs.version }}-linux-x86_64
+          mkdir -p "target/$name"
+          cp target/release/rooste target/release/rooste-cli LICENSE target/notices/THIRD-PARTY-LICENSES.html \
+             packaging/linux/io.github.matbcvo.rooste-ssh.desktop packaging/icons/icon-256.png "target/$name/"
+          tar -C target -czf "target/packages/$name.tar.gz" "$name"
+          ls -la target/packages
+      - name: Smoke test the installed .deb
+        run: |
+          sudo apt-get install -y ./target/packages/*.deb
+          rooste --version
+          rooste-cli --version
+          test -f /usr/share/applications/rooste-ssh.desktop || ls /usr/share/applications | grep -i rooste
+          docker build -t rooste-openssh -f crates/rooste-testkit/docker/openssh/Dockerfile crates/rooste-testkit/docker
+          docker run -d --rm -p 2222:22 rooste-openssh
+          for i in $(seq 1 30); do nc -z 127.0.0.1 2222 && break; sleep 1; done
+          out=$(rooste-cli -p 2222 -i crates/rooste-testkit/keys/id_ed25519 --no-agent --host-key accept-new \
+                --known-hosts "$RUNNER_TEMP/known_hosts" rooste@127.0.0.1 echo smoke-ok)
+          echo "$out"
+          test "$out" = "smoke-ok"
+      - name: Smoke test the AppImage and RPM
+        run: |
+          chmod +x target/packages/*.AppImage
+          target/packages/*.AppImage --appimage-extract-and-run --version
+          sudo apt-get install -y rpm
+          rpm -qpl target/packages/*.rpm | tee /dev/stderr | grep -q /usr/bin/rooste-cli
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-packages
+          path: |
+            target/packages/*.deb
+            target/packages/*.rpm
+            target/packages/*.AppImage
+            target/packages/*.tar.gz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-binaries
+          path: |
+            target/release/rooste
+            target/release/rooste-cli
+
+  windows:
+    name: Windows installer and portable zip
+    needs: notices
+    runs-on: windows-latest
+    env:
+      HAS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+      ROOSTE_TEST_SSH_USER: rooste
+      # Throwaway account on an ephemeral runner; must not contain the user name.
+      ROOSTE_TEST_SSH_PASSWORD: Kq7-vTn2-Lw9-xP!
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: notices
+          path: target/notices
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager
+      - name: Version
+        id: version
+        shell: bash
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-gui") | .version')" >> "$GITHUB_OUTPUT"
+      - run: cargo build --release -p rooste-gui -p rooste-cli
+      - name: Sign executables
+        if: env.HAS_CERTIFICATE == 'true'
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+          & $signtool sign /f "$env:RUNNER_TEMP\cert.pfx" /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 target\release\rooste.exe target\release\rooste-cli.exe
+      - run: cargo packager --release -p rooste-gui --formats wix
+      - name: Consistent file name
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem target\packages\*.msi | Select-Object -First 1
+          Rename-Item $msi.FullName "rooste-ssh-${{ steps.version.outputs.version }}-x64.msi"
+      - name: Sign installer
+        if: env.HAS_CERTIFICATE == 'true'
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+          & $signtool sign /f "$env:RUNNER_TEMP\cert.pfx" /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 (Get-ChildItem target\packages\*.msi).FullName
+      - name: Portable zip
+        shell: pwsh
+        run: |
+          $name = "rooste-ssh-${{ steps.version.outputs.version }}-windows-x64-portable"
+          New-Item -ItemType Directory "target\$name" | Out-Null
+          Copy-Item target\release\rooste.exe, target\release\rooste-cli.exe, LICENSE, target\notices\THIRD-PARTY-LICENSES.html "target\$name"
+          # An empty `portable` file keeps settings next to the executable.
+          New-Item -ItemType File "target\$name\portable" | Out-Null
+          Compress-Archive -Path "target\$name\*" -DestinationPath "target\packages\$name.zip"
+          Get-ChildItem target\packages
+      - name: Smoke test the installed MSI
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem target\packages\*.msi).FullName
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$env:RUNNER_TEMP\msi.log`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\msi.log" -Tail 50; exit $p.ExitCode }
+          $cli = Get-ChildItem "$env:ProgramFiles\rooste-ssh" -Recurse -Filter rooste-cli.exe | Select-Object -First 1
+          if (-not $cli) { Get-ChildItem "$env:ProgramFiles" -Recurse -Filter rooste*.exe -ErrorAction SilentlyContinue; exit 1 }
+          & $cli.FullName --version
+          # Log in to the Windows OpenSSH Server with the installed client.
+          if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {
+            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+          }
+          $password = ConvertTo-SecureString $env:ROOSTE_TEST_SSH_PASSWORD -AsPlainText -Force
+          New-LocalUser -Name $env:ROOSTE_TEST_SSH_USER -Password $password -PasswordNeverExpires
+          Add-LocalGroupMember -Group Administrators -Member $env:ROOSTE_TEST_SSH_USER
+          Start-Service sshd
+          $keys = "$env:ProgramData\ssh\administrators_authorized_keys"
+          Copy-Item crates/rooste-testkit/docker/authorized_keys $keys
+          icacls $keys /inheritance:r /grant "*S-1-5-32-544:F" /grant "SYSTEM:F"
+          Restart-Service sshd
+          $out = & $cli.FullName -i crates/rooste-testkit/keys/id_ed25519 --no-agent --host-key accept-new --known-hosts "$env:RUNNER_TEMP\known_hosts" "$env:ROOSTE_TEST_SSH_USER@127.0.0.1" echo smoke-ok
+          Write-Output $out
+          if (($out | Out-String).Trim() -ne "smoke-ok") { exit 1 }
+      - name: Smoke test the portable zip
+        shell: pwsh
+        run: |
+          Expand-Archive (Get-ChildItem target\packages\*.zip).FullName "$env:RUNNER_TEMP\portable"
+          & "$env:RUNNER_TEMP\portable\rooste-cli.exe" --version
+          & "$env:RUNNER_TEMP\portable\rooste.exe" --version
+      - name: winget manifests
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $sha = (Get-FileHash (Get-ChildItem target\packages\*.msi).FullName -Algorithm SHA256).Hash
+          New-Item -ItemType Directory target\winget | Out-Null
+          foreach ($file in Get-ChildItem packaging\winget\*.yaml) {
+            (Get-Content $file.FullName -Raw).Replace("{{VERSION}}", $version).Replace("{{MSI_SHA256}}", $sha) |
+              Set-Content -NoNewline "target\winget\$($file.Name)"
+          }
+          Get-Content target\winget\*.installer.yaml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-packages
+          path: |
+            target/packages/*.msi
+            target/packages/*.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: winget-manifests
+          path: target/winget/*.yaml
+
+  flatpak:
+    name: Flatpak bundle
+    needs: linux
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-24.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-binaries
+          path: packaging/flatpak/staging
+      - uses: actions/download-artifact@v4
+        with:
+          name: notices
+          path: packaging/flatpak/staging
+      - name: Stage files
+        run: |
+          cp packaging/linux/* packaging/icons/icon-256.png packaging/flatpak/staging/
+          chmod +x packaging/flatpak/staging/rooste packaging/flatpak/staging/rooste-cli
+          ls -la packaging/flatpak/staging
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: rooste-ssh.flatpak
+          manifest-path: packaging/flatpak/io.github.matbcvo.rooste-ssh.yml
+          cache: false
+
+  publish:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows, flatpak]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Check the tag matches the version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="rooste-gui") | .version')
+          test "${GITHUB_REF_NAME}" = "v${version}" || { echo "tag ${GITHUB_REF_NAME} != v${version}"; exit 1; }
+      - name: Collect files and checksums
+        run: |
+          mkdir release
+          find artifacts \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' \
+            -o -name '*.msi' -o -name '*.zip' -o -name '*.flatpak' -o -name 'THIRD-PARTY-LICENSES.html' \) \
+            -exec cp {} release/ \;
+          (cd release && sha256sum * > SHA256SUMS)
+          cat release/SHA256SUMS
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" release/* --title "rooste-ssh ${GITHUB_REF_NAME#v}" --generate-notes

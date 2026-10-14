@@ -1,0 +1,18 @@
+PackageIdentifier: matbcvo.rooste-ssh
+PackageVersion: "{{VERSION}}"
+PackageLocale: en-US
+Publisher: Martin Vooremäe
+PublisherUrl: https://github.com/matbcvo
+PackageName: rooste-ssh
+PackageUrl: https://github.com/matbcvo/rooste-ssh
+License: MIT
+LicenseUrl: https://github.com/matbcvo/rooste-ssh/blob/main/LICENSE
+ShortDescription: SSH, telnet and serial terminal with tabs, SFTP and port forwarding.
+Tags:
+  - ssh
+  - sftp
+  - telnet
+  - serial
+  - terminal
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

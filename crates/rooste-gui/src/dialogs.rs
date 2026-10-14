@@ -439,6 +439,9 @@ impl SettingsEditor {
                             "Reconnect automatically when a connection drops",
                         )
                     });
+                    labeled(ui, "", |ui| {
+                        ui.checkbox(&mut s.check_updates, "Check for updates at startup")
+                    });
                 });
             let (save, cancel) = buttons(ui, "Save");
             if save {

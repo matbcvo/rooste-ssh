@@ -108,6 +108,8 @@ pub enum Dialog {
 pub struct Notice {
     pub text: String,
     pub error: bool,
+    /// A web link shown after the text.
+    pub link: Option<(String, String)>,
 }
 
 /// Where imports read from; overridable for tests.
@@ -171,6 +173,8 @@ pub struct RoosteApp {
     agent: AgentSource,
     /// The built-in SSH agent, once started.
     pub builtin_agent: Option<rooste_keys::Agent>,
+    /// Result of the startup update check, when it finishes.
+    update_check: Option<std::sync::mpsc::Receiver<Option<crate::update::Release>>>,
     /// Serial ports found when the profile editor opened.
     serial_ports: Vec<String>,
     known_hosts: Option<PathBuf>,
@@ -205,6 +209,7 @@ impl RoosteApp {
                 Some(Notice {
                     text: format!("{e}; changes will not be saved"),
                     error: true,
+                    link: None,
                 }),
             ),
         };
@@ -241,6 +246,7 @@ impl RoosteApp {
             broadcast: false,
             agent: AgentSource::Default,
             builtin_agent: None,
+            update_check: None,
             serial_ports: Vec::new(),
             known_hosts: None,
             imports: ImportSources::default(),
@@ -252,6 +258,24 @@ impl RoosteApp {
     /// Use a specific known_hosts file instead of `~/.ssh/known_hosts`.
     pub fn with_known_hosts(mut self, path: PathBuf) -> Self {
         self.known_hosts = Some(path);
+        self
+    }
+
+    /// Check GitHub for a newer release in the background, if enabled.
+    pub fn with_update_check(mut self) -> Self {
+        if self.config.settings.check_updates {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let latest = crate::update::fetch_latest(
+                    crate::update::RELEASES_API,
+                    env!("CARGO_PKG_VERSION"),
+                )
+                .ok()
+                .flatten();
+                let _ = tx.send(latest);
+            });
+            self.update_check = Some(rx);
+        }
         self
     }
 
@@ -309,6 +333,7 @@ impl RoosteApp {
             self.notice = Some(Notice {
                 text: e.to_string(),
                 error: true,
+                link: None,
             });
         }
     }
@@ -317,6 +342,7 @@ impl RoosteApp {
         self.notice = Some(Notice {
             text: text.into(),
             error,
+            link: None,
         });
     }
 
@@ -682,6 +708,21 @@ impl RoosteApp {
             self.applied_theme = Some(self.config.settings.theme);
         }
 
+        if let Some(rx) = &self.update_check
+            && let Ok(result) = rx.try_recv()
+        {
+            self.update_check = None;
+            if let Some(release) = result
+                && self.notice.is_none()
+            {
+                self.notice = Some(Notice {
+                    text: format!("rooste-ssh {} is available.", release.version),
+                    error: false,
+                    link: Some(("Download".into(), release.url)),
+                });
+            }
+        }
+
         // Session events and tab actions.
         for id in self.tab_ids() {
             let actions = match self.tab_mut(id) {
@@ -878,6 +919,9 @@ impl RoosteApp {
                     ui.colored_label(ui.visuals().error_fg_color, &notice.text);
                 } else {
                     ui.label(&notice.text);
+                }
+                if let Some((label, url)) = &notice.link {
+                    ui.hyperlink_to(label, url);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button("✕").on_hover_text("Dismiss").clicked() {
