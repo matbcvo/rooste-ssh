@@ -90,7 +90,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Criterion compares against the previous run's results.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: target/criterion
           key: criterion-${{ github.run_id }}
