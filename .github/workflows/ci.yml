@@ -39,7 +39,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        toolchain: [stable, "1.85"] # keep in sync with rust-version in Cargo.toml
+        toolchain: [stable, "1.89"] # keep in sync with rust-version in Cargo.toml
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -76,6 +76,43 @@ jobs:
       - name: OpenSSH logs
         if: failure()
         run: docker logs rooste-openssh
+
+  integration-windows:
+    name: Integration (Windows, OpenSSH Server)
+    runs-on: windows-latest
+    env:
+      # Throwaway account on an ephemeral runner.
+      ROOSTE_TEST_SSH_ADDR: 127.0.0.1:22
+      ROOSTE_TEST_SSH_USER: rooste
+      # Windows rejects passwords that contain the user name.
+      ROOSTE_TEST_SSH_PASSWORD: Kq7-vTn2-Lw9-xP!
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: Start Windows OpenSSH Server
+        shell: pwsh
+        run: |
+          if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {
+            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+          }
+          $password = ConvertTo-SecureString $env:ROOSTE_TEST_SSH_PASSWORD -AsPlainText -Force
+          New-LocalUser -Name $env:ROOSTE_TEST_SSH_USER -Password $password -PasswordNeverExpires
+          # Keys of administrators are read from administrators_authorized_keys.
+          Add-LocalGroupMember -Group Administrators -Member $env:ROOSTE_TEST_SSH_USER
+          Start-Service sshd
+          $keys = "$env:ProgramData\ssh\administrators_authorized_keys"
+          Copy-Item crates/rooste-testkit/docker/openssh/authorized_keys $keys
+          icacls $keys /inheritance:r /grant "*S-1-5-32-544:F" /grant "SYSTEM:F"
+          Restart-Service sshd
+      - run: cargo nextest run --workspace --profile ci --run-ignored only
+      - name: OpenSSH logs
+        if: failure()
+        shell: pwsh
+        run: Get-WinEvent -LogName OpenSSH/Operational -MaxEvents 50 | Format-List TimeCreated, Message
 
   deny:
     name: cargo-deny

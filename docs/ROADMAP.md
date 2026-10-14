@@ -31,13 +31,13 @@ agent on Windows.
 | Legacy algorithms | Modern defaults; a small legacy set can be enabled **per session only** (see [Security](#security)) |
 | Platforms | Linux and Windows. macOS may come for free later |
 | License | MIT |
-| MSRV | Rust 1.85 (edition 2024) |
+| MSRV | Rust 1.89 (edition 2024; required by russh) |
 
 ## Technology
 
 | Concern | Choice | Why |
 |---|---|---|
-| SSH | `russh` | Pure Rust, async, no C toolchain needed on Windows |
+| SSH | `russh` with the `ring` crypto backend | Pure Rust, async; `ring` builds easily on Windows |
 | Async runtime | `tokio` | Required by russh |
 | Terminal emulation | `alacritty_terminal` | Proven VT parser and grid |
 | GUI | `egui`/`eframe` + custom terminal widget | Fast to build, identical on both OSes, GPU via wgpu |
@@ -71,17 +71,17 @@ crates/
 
 Each milestone is done only when its tests pass in CI on **both Linux and Windows**.
 
-### M0 — Foundations ✅ (scaffolded)
+### M0 — Foundations ✅
 - Cargo workspace, rustfmt, clippy, `cargo-deny`, MIT license, README.
 - `ci.yml`: lint, Linux + Windows × stable + MSRV test matrix, OpenSSH Docker integration job,
   cargo-deny, coverage.
 - `rooste-testkit` skeleton and OpenSSH Docker fixture; Dependabot.
 
-### M1 — Headless SSH client (`rooste-cli`)
+### M1 — Headless SSH client (`rooste-cli`) ✅
 - Password, key-file and agent authentication.
 - Host-key verification against `known_hosts`.
 - Interactive PTY in a raw-mode terminal, resize.
-- Audit which algorithms russh supports (modern and legacy) and record the result here.
+- Audit which algorithms russh supports (modern and legacy) — see [Security](#security).
 - In-process `russh` test server in `rooste-testkit`; Windows OpenSSH Server CI job.
 - **Tests required:** password, key and agent login; host-key mismatch; resize — on both OSes.
 
@@ -171,15 +171,25 @@ Windows-only code (named-pipe agent, registry import) gets Windows-only tests.
 
 | Tier | Algorithms | Behavior |
 |---|---|---|
-| Default | curve25519 KEX; Ed25519, ECDSA, RSA-SHA2 keys; ChaCha20-Poly1305, AES-GCM, AES-CTR; HMAC-SHA2 | Always on |
-| Legacy (opt-in per session) | DH group14/group1 SHA-1, `ssh-rsa` SHA-1 signatures, AES-CBC, HMAC-SHA1 | Off by default; never a global setting; ⚠ on the tab |
+| Default | mlkem768x25519 (post-quantum hybrid), curve25519, ECDH NIST P-256/384/521, DH group 14–18 and group-exchange with SHA-2 KEX; Ed25519, ECDSA, RSA-SHA2 keys; ChaCha20-Poly1305, AES-GCM, AES-CTR; HMAC-SHA2 (incl. ETM) | Always on |
+| Legacy (opt-in per session) | DH group 14, group 1 and group-exchange with SHA-1; `ssh-rsa` SHA-1 signatures; AES-CBC; HMAC-SHA1 (incl. ETM) | Off by default; never a global setting; ⚠ on the tab |
 | Never | SSH-1, DSA, DES/3DES, RC4 | Not implemented |
 
 - `unsafe_code = "forbid"` workspace-wide; crates that truly need unsafe opt out explicitly.
 - Key material held in zeroized memory.
+- Known issue: the `rsa` crate is affected by the Marvin timing attack (RUSTSEC-2023-0071) with no
+  fix released yet. Exposure is low for a client (local signing, once per login), so it is an
+  explicit exception in `deny.toml`; prefer Ed25519 keys. Revisit when a fixed `rsa` ships.
+- The policy lives in [crates/rooste-proto/src/ssh/algorithms.rs](../crates/rooste-proto/src/ssh/algorithms.rs).
+  russh's own default also offers `ssh-rsa` (SHA-1) host keys; rooste-ssh moves it to the legacy
+  tier. Never-supported algorithms are excluded at build time (the russh `dsa` and `des` features
+  are off).
+- Audit (russh 0.64): every algorithm in the default and legacy tiers is implemented with the
+  `ring` backend; `aws-lc-rs` offers the same set.
 
 ## Risks
 
 - Terminal correctness and Windows keyboard input — budget extra time for M2.
-- russh gaps: no GSSAPI/Kerberos; legacy algorithm coverage to be confirmed in M1.
+- russh gaps: GSSAPI/Kerberos needs an external implementation of russh's `GssapiAuthenticator`;
+  keyboard-interactive login is not wired up yet (password auth covers most servers).
 - Font rendering (fallback, CJK, emoji) in egui.

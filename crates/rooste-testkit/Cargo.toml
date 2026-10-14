@@ -9,5 +9,11 @@ repository.workspace = true
 authors.workspace = true
 publish = false
 
+[dependencies]
+futures.workspace = true
+russh.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
 [lints]
 workspace = true

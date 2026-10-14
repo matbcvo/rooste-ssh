@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/matbcvo/rooste-ssh"
 authors = ["Martin Vooremäe"]
@@ -17,6 +17,17 @@ rooste-term = { path = "crates/rooste-term" }
 rooste-keys = { path = "crates/rooste-keys" }
 rooste-sftp = { path = "crates/rooste-sftp" }
 rooste-testkit = { path = "crates/rooste-testkit" }
+
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+crossterm = { version = "0.29.0", features = ["event-stream"] }
+futures = "0.3.34"
+rpassword = "7.5.4"
+russh = { version = "0.64.1", default-features = false, features = ["ring", "flate2", "rsa"] }
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util", "io-std", "sync", "time", "signal", "fs"] }
+zeroize = "1.9.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

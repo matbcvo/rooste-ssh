@@ -9,5 +9,15 @@ repository.workspace = true
 authors.workspace = true
 publish = false
 
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+futures.workspace = true
+rooste-proto.workspace = true
+rooste-term.workspace = true
+rpassword.workspace = true
+tokio.workspace = true
+
 [lints]
 workspace = true

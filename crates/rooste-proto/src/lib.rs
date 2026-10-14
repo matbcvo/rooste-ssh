@@ -6,6 +6,8 @@
 use std::future::Future;
 use std::io;
 
+pub mod ssh;
+
 /// A bidirectional byte stream backing one terminal session.
 pub trait Transport: Send {
     /// Read bytes from the remote side. Returns `Ok(0)` on end of stream.
