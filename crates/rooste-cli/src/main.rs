@@ -1,7 +1,7 @@
 //! Headless SSH client: `rooste-cli [user@]host [command...]`.
 
 mod auth;
-mod destination;
+mod forwards;
 mod interactive;
 
 use std::io::{BufRead, Write};
@@ -12,10 +12,11 @@ use anyhow::Context;
 use clap::{Parser, ValueEnum};
 use futures::future::BoxFuture;
 use rooste_proto::ssh::{
-    HostKeyPolicy, HostKeyPrompt, PtyRequest, SshConfig, SshError, UnknownHostKey, connect,
+    AgentSource, HostKeyPolicy, HostKeyPrompt, PtyRequest, SshClient, SshConfig, SshError,
+    UnknownHostKey, connect, connect_via,
 };
 
-use destination::Destination;
+use rooste_core::Destination;
 
 /// Exit code for local and connection errors, as OpenSSH uses.
 const EXIT_ERROR: u8 = 255;
@@ -54,6 +55,43 @@ struct Args {
     /// Also offer outdated algorithms (SHA-1, CBC) for old devices
     #[arg(long)]
     allow_legacy: bool,
+
+    #[arg(
+        short = 'J',
+        long = "jump",
+        value_name = "HOSTS",
+        help = "Connect through these jump hosts: [user@]host[:port][,...]"
+    )]
+    jump: Option<String>,
+
+    #[arg(
+        short = 'L',
+        value_name = "SPEC",
+        help = "Local forward [bind:]port:host:hostport; may be repeated"
+    )]
+    local: Vec<String>,
+
+    #[arg(
+        short = 'R',
+        value_name = "SPEC",
+        help = "Remote forward [bind:]port:host:hostport; may be repeated"
+    )]
+    remote: Vec<String>,
+
+    #[arg(
+        short = 'D',
+        value_name = "SPEC",
+        help = "SOCKS proxy on [bind:]port; may be repeated"
+    )]
+    dynamic: Vec<String>,
+
+    /// Forward the SSH agent to the server
+    #[arg(short = 'A')]
+    forward_agent: bool,
+
+    /// Only forward ports; no shell or command
+    #[arg(short = 'N')]
+    no_command: bool,
 
     /// Run this command instead of an interactive shell
     #[arg(trailing_var_arg = true)]
@@ -102,26 +140,65 @@ async fn run(args: Args) -> anyhow::Result<u8> {
         .or_else(local_user)
         .context("no user name given; use user@host or -l")?;
 
-    let mut config = SshConfig::new(host.clone(), port);
-    if let Some(path) = args.known_hosts {
-        config.known_hosts = path;
-    }
-    config.allow_legacy_algorithms = args.allow_legacy;
-    config.host_key_policy = match args.host_key {
+    let policy = match args.host_key {
         HostKeyMode::Ask => HostKeyPolicy::Ask(Arc::new(TerminalPrompt)),
         HostKeyMode::AcceptNew => HostKeyPolicy::AcceptNew,
         HostKeyMode::Strict => HostKeyPolicy::Strict,
     };
-
-    let mut client = connect(&config).await?;
+    let config_for = |host: &str, port: u16| {
+        let mut config = SshConfig::new(host, port);
+        if let Some(path) = &args.known_hosts {
+            config.known_hosts = path.clone();
+        }
+        config.allow_legacy_algorithms = args.allow_legacy;
+        config.host_key_policy = policy.clone();
+        config
+    };
     let methods = auth::Methods {
         agent: !args.no_agent,
-        identities: args.identities,
+        identities: args.identities.clone(),
+    };
+    let specs = forwards::Specs::parse(&args.local, &args.remote, &args.dynamic)?;
+
+    // Each jump host is reached through the previous one.
+    let mut previous: Option<SshClient> = None;
+    let hops = match &args.jump {
+        Some(jump) => Destination::parse_list(jump)?,
+        None => Vec::new(),
+    };
+    for hop in hops {
+        let hop_user = hop.user.clone().unwrap_or_else(|| user.clone());
+        let config = config_for(&hop.host, hop.port.unwrap_or(22));
+        let mut client = match previous.take() {
+            None => connect(&config).await?,
+            Some(via) => connect_via(via, &config).await?,
+        };
+        auth::authenticate(&mut client, &hop_user, &hop.host, methods.clone()).await?;
+        previous = Some(client);
+    }
+    let config = config_for(&host, port);
+    let mut client = match previous {
+        None => connect(&config).await?,
+        Some(via) => connect_via(via, &config).await?,
     };
     auth::authenticate(&mut client, &user, &host, methods).await?;
 
+    let _forwards = specs.start(&client).await?;
+    let agent = args.forward_agent.then_some(AgentSource::Default);
+    if args.no_command {
+        eprintln!("Forwarding; press Ctrl+C to stop.");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = async { while !client.is_closed() { tokio::time::sleep(std::time::Duration::from_millis(500)).await } } => {
+                anyhow::bail!("connection closed");
+            }
+        }
+        let _ = client.disconnect().await;
+        return Ok(0);
+    }
+
     if !args.command.is_empty() {
-        let output = client.exec(&args.command.join(" ")).await?;
+        let output = client.exec_with(&args.command.join(" "), agent).await?;
         std::io::stdout().write_all(&output.stdout)?;
         std::io::stderr().write_all(&output.stderr)?;
         return Ok(exit_code(output.exit_status));
@@ -133,7 +210,7 @@ async fn run(args: Args) -> anyhow::Result<u8> {
         cols,
         rows,
     };
-    let mut shell = client.open_shell(&pty).await?;
+    let mut shell = client.open_shell_with(&pty, agent).await?;
     interactive::run(&mut shell).await?;
     let status = shell.exit_status();
     let _ = client.disconnect().await;

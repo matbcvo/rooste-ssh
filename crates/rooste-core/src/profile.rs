@@ -30,7 +30,97 @@ pub struct Profile {
     pub allow_legacy: bool,
     /// Jump host(s), as in OpenSSH `ProxyJump`.
     pub proxy_jump: Option<String>,
+    /// Forward the local SSH agent to the server.
+    pub forward_agent: bool,
+    /// Port forwards started with the session.
+    pub tunnels: Vec<Tunnel>,
     pub notes: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TunnelKind {
+    /// Local port to a host reachable from the server (`ssh -L`).
+    #[default]
+    Local,
+    /// Server port to a host reachable from here (`ssh -R`).
+    Remote,
+    /// Local SOCKS proxy (`ssh -D`).
+    Dynamic,
+}
+
+/// A saved port forward.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Tunnel {
+    pub kind: TunnelKind,
+    /// Where to listen: `port` or `address:port`. Local and dynamic
+    /// forwards listen here; remote forwards on the server.
+    pub listen: String,
+    /// `host:port` to connect to; unused for dynamic forwards.
+    pub target: String,
+}
+
+impl Tunnel {
+    /// The listen address with a default bind address added.
+    pub fn listen_addr(&self) -> Result<(String, u16), String> {
+        split_host_port(&self.listen, "127.0.0.1")
+    }
+
+    pub fn target_addr(&self) -> Result<(String, u16), String> {
+        split_host_port(&self.target, "").and_then(|(h, p)| {
+            if h.is_empty() {
+                Err(format!("`{}` needs a host", self.target))
+            } else {
+                Ok((h, p))
+            }
+        })
+    }
+
+    /// Check the fields, so mistakes surface in the editor.
+    pub fn validate(&self) -> Result<(), String> {
+        self.listen_addr()?;
+        if self.kind != TunnelKind::Dynamic {
+            self.target_addr()?;
+        }
+        Ok(())
+    }
+
+    /// Short description like `L 8080 → db:5432`.
+    pub fn describe(&self) -> String {
+        match self.kind {
+            TunnelKind::Local => format!("L {} → {}", self.listen, self.target),
+            TunnelKind::Remote => format!("R {} → {}", self.listen, self.target),
+            TunnelKind::Dynamic => format!("D {} (SOCKS)", self.listen),
+        }
+    }
+}
+
+/// `port`, `host:port` or `[v6]:port`.
+fn split_host_port(text: &str, default_host: &str) -> Result<(String, u16), String> {
+    let text = text.trim();
+    let (host, port) = if let Some(rest) = text.strip_prefix('[') {
+        let (host, port) = rest
+            .split_once("]:")
+            .ok_or_else(|| format!("`{text}` is not host:port"))?;
+        (host.to_owned(), port)
+    } else {
+        match text.rsplit_once(':') {
+            Some((host, port)) => (host.to_owned(), port),
+            None => (default_host.to_owned(), text),
+        }
+    };
+    let port = port
+        .parse::<u16>()
+        .map_err(|_| format!("`{text}` has an invalid port"))?;
+    Ok((
+        if host.is_empty() {
+            default_host.to_owned()
+        } else {
+            host
+        },
+        port,
+    ))
 }
 
 impl Default for Profile {
@@ -49,6 +139,8 @@ impl Default for Profile {
             save_password: false,
             allow_legacy: false,
             proxy_jump: None,
+            forward_agent: false,
+            tunnels: Vec::new(),
             notes: String::new(),
         }
     }
@@ -116,6 +208,49 @@ mod tests {
             user: "deploy".into(),
             ..Profile::default()
         }
+    }
+
+    #[test]
+    fn tunnel_addresses() {
+        let local = Tunnel {
+            kind: TunnelKind::Local,
+            listen: "8080".into(),
+            target: "db.internal:5432".into(),
+        };
+        assert_eq!(local.listen_addr().unwrap(), ("127.0.0.1".into(), 8080));
+        assert_eq!(local.target_addr().unwrap(), ("db.internal".into(), 5432));
+        assert_eq!(local.describe(), "L 8080 → db.internal:5432");
+        assert!(local.validate().is_ok());
+
+        let any = Tunnel {
+            listen: "0.0.0.0:1080".into(),
+            kind: TunnelKind::Dynamic,
+            ..Tunnel::default()
+        };
+        assert_eq!(any.listen_addr().unwrap(), ("0.0.0.0".into(), 1080));
+        assert!(any.validate().is_ok(), "dynamic needs no target");
+
+        let v6 = Tunnel {
+            listen: "[::1]:22".into(),
+            target: "x:1".into(),
+            ..Tunnel::default()
+        };
+        assert_eq!(v6.listen_addr().unwrap(), ("::1".into(), 22));
+
+        for bad in ["", "abc", "host:99999"] {
+            let t = Tunnel {
+                listen: bad.into(),
+                target: "x:1".into(),
+                ..Tunnel::default()
+            };
+            assert!(t.validate().is_err(), "{bad}");
+        }
+        let no_target = Tunnel {
+            listen: "1".into(),
+            target: "5432".into(),
+            ..Tunnel::default()
+        };
+        assert!(no_target.validate().is_err());
     }
 
     #[test]

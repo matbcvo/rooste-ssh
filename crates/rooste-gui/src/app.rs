@@ -4,12 +4,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use egui::{RichText, Ui};
-use egui_tiles::{Container, SimplificationOptions, Tile, TileId, Tree, UiResponse};
+use egui_tiles::{Container, LinearDir, SimplificationOptions, Tile, TileId, Tree, UiResponse};
 use rooste_core::import::{putty, ssh_config};
 use rooste_core::{Config, ConfigLocation, Profile, Protocol, SecretStore, Settings, Theme};
+use rooste_proto::ssh::AgentSource;
 
 use crate::dialogs::{self, Decision, ProfileEditor, SettingsEditor};
 use crate::manager::{self, ManagerAction, ManagerState};
+use crate::palette::{self as command_palette, Command};
 use crate::session::ConnectRequest;
 use crate::tab::{SessionTab, TabAction};
 use crate::theme;
@@ -76,6 +78,10 @@ impl ConnectForm {
             cols: 80,
             rows: 24,
             prompt_for_password: true,
+            proxy_jump: None,
+            forward_agent: false,
+            agent: AgentSource::Default,
+            tunnels: Vec::new(),
         })
     }
 }
@@ -88,6 +94,7 @@ pub enum Dialog {
     DeleteProfile(String),
     CloseTab(TileId),
     QuickConnect,
+    Palette { query: String },
 }
 
 /// A message in the status bar.
@@ -153,6 +160,9 @@ pub struct RoosteApp {
     pub quick_error: Option<String>,
     pub notice: Option<Notice>,
     pub show_manager: bool,
+    /// Input in one tab goes to all connected tabs.
+    pub broadcast: bool,
+    agent: AgentSource,
     known_hosts: Option<PathBuf>,
     imports: ImportSources,
     window_title: String,
@@ -218,6 +228,8 @@ impl RoosteApp {
             quick_error: None,
             notice: None,
             show_manager: true,
+            broadcast: false,
+            agent: AgentSource::Default,
             known_hosts: None,
             imports: ImportSources::default(),
             window_title: String::new(),
@@ -228,6 +240,12 @@ impl RoosteApp {
     /// Use a specific known_hosts file instead of `~/.ssh/known_hosts`.
     pub fn with_known_hosts(mut self, path: PathBuf) -> Self {
         self.known_hosts = Some(path);
+        self
+    }
+
+    /// Use a specific SSH agent for login and forwarding.
+    pub fn with_agent(mut self, agent: AgentSource) -> Self {
+        self.agent = agent;
         self
     }
 
@@ -315,6 +333,10 @@ impl RoosteApp {
             cols: 80,
             rows: 24,
             prompt_for_password: true,
+            proxy_jump: profile.proxy_jump.clone(),
+            forward_agent: profile.forward_agent,
+            agent: self.agent.clone(),
+            tunnels: profile.tunnels.clone(),
         }
     }
 
@@ -408,16 +430,91 @@ impl RoosteApp {
         self.tree.remove_recursively(id);
     }
 
-    fn reconnect(&mut self, ctx: &egui::Context, id: TileId) {
+    /// A new tab connecting like the active one.
+    pub fn duplicate_active(&mut self) {
         let settings = self.config.settings.clone();
-        let handle = self.runtime.handle().clone();
-        if let Some(Tile::Pane(tab)) = self.tree.tiles.get_mut(id) {
-            let mut request = tab.request.clone();
-            (request.cols, request.rows) = tab.terminal.size();
-            let mut fresh = SessionTab::open(&handle, ctx, tab.name.clone(), request, &settings);
-            fresh.profile_id = tab.profile_id.clone();
-            fresh.save_password = tab.save_password;
-            *tab = fresh;
+        if let Some(tab) = self
+            .active_tab_id()
+            .and_then(|id| self.tree.tiles.get_pane(&id))
+            .map(|tab| tab.duplicate(&settings))
+        {
+            self.add_tab(tab);
+        }
+    }
+
+    /// Open a copy of the active tab beside it.
+    pub fn split_active(&mut self, dir: LinearDir) {
+        let settings = self.config.settings.clone();
+        let Some(active) = self.active_tab_id() else {
+            return;
+        };
+        let Some(tab) = self
+            .tree
+            .tiles
+            .get_pane(&active)
+            .map(|t| t.duplicate(&settings))
+        else {
+            return;
+        };
+        // Split the tab group holding the active tab.
+        let group = self.tree.tiles.parent_of(active).unwrap_or(active);
+        let pane = self.tree.tiles.insert_pane(tab);
+        let new_group = self.tree.tiles.insert_tab_tile(vec![pane]);
+        let split = match dir {
+            LinearDir::Horizontal => self
+                .tree
+                .tiles
+                .insert_horizontal_tile(vec![group, new_group]),
+            LinearDir::Vertical => self.tree.tiles.insert_vertical_tile(vec![group, new_group]),
+        };
+        match self.tree.tiles.parent_of(group).filter(|&p| p != split) {
+            Some(parent) => {
+                if let Some(Tile::Container(container)) = self.tree.tiles.get_mut(parent) {
+                    replace_child(container, group, split);
+                }
+            }
+            None => self.tree.root = Some(split),
+        }
+    }
+
+    fn toggle_broadcast(&mut self) {
+        self.broadcast = !self.broadcast;
+        let count = self
+            .tabs()
+            .filter(|t| t.state == TabState::Connected)
+            .count();
+        if self.broadcast {
+            self.notify(
+                format!("Broadcasting input to {count} connected tabs."),
+                false,
+            );
+        } else {
+            self.notify("Stopped broadcasting input.", false);
+        }
+    }
+
+    fn run_command(&mut self, ctx: &egui::Context, command: Command) {
+        match command {
+            Command::Connect(id) => self.connect_profile(ctx, &id),
+            Command::NewSession => self.handle_manager(ctx, ManagerAction::New),
+            Command::QuickConnect => self.dialog = Some(Dialog::QuickConnect),
+            Command::ImportPutty => self.import(true),
+            Command::ImportSshConfig => self.import(false),
+            Command::Settings => {
+                self.dialog = Some(Dialog::Settings(SettingsEditor {
+                    settings: self.config.settings.clone(),
+                }))
+            }
+            Command::DuplicateTab => self.duplicate_active(),
+            Command::SplitRight => self.split_active(LinearDir::Horizontal),
+            Command::SplitDown => self.split_active(LinearDir::Vertical),
+            Command::ToggleBroadcast => self.toggle_broadcast(),
+            Command::ToggleSessionManager => self.show_manager = !self.show_manager,
+            Command::CloseTab => {
+                if let Some(id) = self.active_tab_id() {
+                    self.request_close(id);
+                }
+            }
         }
     }
 
@@ -515,7 +612,14 @@ impl RoosteApp {
             };
             for action in actions {
                 match action {
-                    TabAction::Reconnect => self.reconnect(&ctx, id),
+                    TabAction::EnableLegacy { profile_id } => {
+                        if let Some(profile) = profile_id
+                            .and_then(|id| self.config.profiles.iter_mut().find(|p| p.id == id))
+                        {
+                            profile.allow_legacy = true;
+                            self.save_config();
+                        }
+                    }
                     TabAction::SavePassword {
                         profile_id,
                         password,
@@ -552,7 +656,14 @@ impl RoosteApp {
                     let mut behavior = TabBehavior {
                         close_requests: Vec::new(),
                     };
+                    let broadcast = self.broadcast;
+                    for (_, tile) in self.tree.tiles.iter_mut() {
+                        if let Tile::Pane(tab) = tile {
+                            tab.broadcast = broadcast && tab.state == TabState::Connected;
+                        }
+                    }
                     self.tree.ui(&mut behavior, ui);
+                    self.deliver_broadcast();
                     for id in behavior.close_requests {
                         self.request_close(id);
                     }
@@ -562,6 +673,24 @@ impl RoosteApp {
         self.dialogs(&ctx);
         self.shortcuts(&ctx);
         self.update_window_title(&ctx);
+    }
+
+    /// Send input typed in broadcasting tabs to every connected tab.
+    fn deliver_broadcast(&mut self) {
+        let mut input = Vec::new();
+        for (_, tile) in self.tree.tiles.iter_mut() {
+            if let Tile::Pane(tab) = tile {
+                input.append(&mut tab.outbox);
+            }
+        }
+        if input.is_empty() {
+            return;
+        }
+        for (_, tile) in self.tree.tiles.iter_mut() {
+            if let Tile::Pane(tab) = tile {
+                tab.send_input(input.clone());
+            }
+        }
     }
 
     fn menu_bar(&mut self, ui: &mut Ui) {
@@ -594,11 +723,46 @@ impl RoosteApp {
                         ui.close();
                     }
                 });
+                ui.menu_button("Tab", |ui| {
+                    let has_tab = self.active_tab_id().is_some();
+                    for (label, command) in [
+                        ("Duplicate tab", Command::DuplicateTab),
+                        ("Split right", Command::SplitRight),
+                        ("Split down", Command::SplitDown),
+                    ] {
+                        if ui.add_enabled(has_tab, egui::Button::new(label)).clicked() {
+                            self.run_command(&ctx, command);
+                            ui.close();
+                        }
+                    }
+                    if ui
+                        .checkbox(&mut self.broadcast, "Broadcast input to all tabs")
+                        .clicked()
+                    {
+                        self.broadcast = !self.broadcast;
+                        self.toggle_broadcast();
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui
+                        .add_enabled(has_tab, egui::Button::new("Close tab"))
+                        .clicked()
+                    {
+                        self.run_command(&ctx, Command::CloseTab);
+                        ui.close();
+                    }
+                });
                 ui.menu_button("View", |ui| {
                     if ui
                         .checkbox(&mut self.show_manager, "Session manager")
                         .clicked()
                     {
+                        ui.close();
+                    }
+                    if ui.button("Command palette…").clicked() {
+                        self.dialog = Some(Dialog::Palette {
+                            query: String::new(),
+                        });
                         ui.close();
                     }
                 });
@@ -771,6 +935,20 @@ impl RoosteApp {
                     }
                 }
             }
+            Dialog::Palette { query } => {
+                let commands = command_palette::commands(
+                    &self.config.profiles,
+                    self.active_tab_id().is_some(),
+                );
+                match command_palette::show(ctx, query, &commands) {
+                    Decision::Pending => true,
+                    Decision::Cancel => false,
+                    Decision::Accept(command) => {
+                        self.run_command(ctx, command);
+                        false
+                    }
+                }
+            }
             Dialog::QuickConnect => {
                 let mut keep = true;
                 egui::Modal::new(egui::Id::new("quick-connect-dialog")).show(ctx, |ui| {
@@ -797,6 +975,11 @@ impl RoosteApp {
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(ctrl_shift, Key::T))) {
             self.dialog = Some(Dialog::QuickConnect);
         }
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(ctrl_shift, Key::P))) {
+            self.dialog = Some(Dialog::Palette {
+                query: String::new(),
+            });
+        }
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(ctrl_shift, Key::W)))
             && let Some(id) = self.active_tab_id()
         {
@@ -818,6 +1001,25 @@ impl RoosteApp {
         if title != self.window_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.window_title = title;
+        }
+    }
+}
+
+/// Replace `old` with `new` among a container's children.
+fn replace_child(container: &mut Container, old: TileId, new: TileId) {
+    let children = match container {
+        Container::Tabs(tabs) => {
+            if tabs.active == Some(old) {
+                tabs.active = Some(new);
+            }
+            &mut tabs.children
+        }
+        Container::Linear(linear) => &mut linear.children,
+        Container::Grid(_) => return,
+    };
+    for child in children.iter_mut() {
+        if *child == old {
+            *child = new;
         }
     }
 }

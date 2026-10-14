@@ -6,10 +6,11 @@ use std::sync::Arc;
 use std::sync::mpsc as std_mpsc;
 
 use futures::future::BoxFuture;
+use rooste_core::{Destination, Tunnel, TunnelKind};
 use rooste_proto::Transport;
 use rooste_proto::ssh::{
-    AgentSource, Auth, HostKeyPolicy, HostKeyPrompt, PtyRequest, SshConfig, SshError,
-    UnknownHostKey, connect, load_private_key,
+    AgentSource, Auth, Forward, HostKeyPolicy, HostKeyPrompt, PtyRequest, SshClient, SshConfig,
+    SshError, UnknownHostKey, connect, connect_via, load_private_key,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -30,6 +31,70 @@ pub struct ConnectRequest {
     pub rows: u16,
     /// Ask for a password when no other method works (as `ssh` does).
     pub prompt_for_password: bool,
+    /// Jump hosts, as OpenSSH `ProxyJump`.
+    pub proxy_jump: Option<String>,
+    pub forward_agent: bool,
+    /// Agent used for login and forwarding.
+    pub agent: AgentSource,
+    pub tunnels: Vec<Tunnel>,
+}
+
+/// How a session ended unsuccessfully.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    pub message: String,
+    /// The server would be reachable with legacy algorithms enabled.
+    pub legacy_hint: bool,
+    /// An established connection dropped (worth reconnecting).
+    pub lost: bool,
+}
+
+impl Failure {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            legacy_hint: false,
+            lost: false,
+        }
+    }
+
+    fn lost(message: impl Into<String>) -> Self {
+        Self {
+            lost: true,
+            ..Self::new(message)
+        }
+    }
+}
+
+impl From<SshError> for Failure {
+    fn from(error: SshError) -> Self {
+        let legacy_hint = matches!(
+            error,
+            SshError::NoCommonAlgorithm {
+                legacy_would_help: true,
+                ..
+            }
+        );
+        Self {
+            message: describe(error),
+            legacy_hint,
+            lost: false,
+        }
+    }
+}
+
+impl From<String> for Failure {
+    fn from(message: String) -> Self {
+        Self::new(message)
+    }
+}
+
+/// State of one saved tunnel after the session started it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunnelStatus {
+    pub description: String,
+    /// `Err` explains why the tunnel could not start.
+    pub result: Result<String, String>,
 }
 
 /// What a prompt asks for.
@@ -60,11 +125,12 @@ pub enum SessionEvent {
     /// Login succeeded with this password (so the UI may save it).
     PasswordAccepted(String),
     Connected,
+    Tunnels(Vec<TunnelStatus>),
     Output(Vec<u8>),
     Closed {
         exit_status: Option<u32>,
     },
-    Failed(String),
+    Failed(Failure),
 }
 
 /// From the UI to the session.
@@ -99,7 +165,7 @@ impl Session {
         runtime.spawn(async move {
             let done = match run(request, command_rx, &sink).await {
                 Ok(exit_status) => SessionEvent::Closed { exit_status },
-                Err(message) => SessionEvent::Failed(message),
+                Err(failure) => SessionEvent::Failed(failure),
             };
             sink.send(done);
         });
@@ -144,25 +210,74 @@ async fn run(
     request: ConnectRequest,
     mut commands: mpsc::UnboundedReceiver<SessionCommand>,
     sink: &EventSink,
-) -> Result<Option<u32>, String> {
+) -> Result<Option<u32>, Failure> {
+    let config_for = |host: &str, port: u16| {
+        let mut config = SshConfig::new(host, port);
+        config.allow_legacy_algorithms = request.allow_legacy;
+        config.host_key_policy = HostKeyPolicy::Ask(Arc::new(UiPrompt(sink.clone())));
+        if let Some(path) = &request.known_hosts {
+            config.known_hosts = path.clone();
+        }
+        config
+    };
+
+    // Each jump host is reached through the previous one.
+    let hops = match request.proxy_jump.as_deref() {
+        Some(jump) => Destination::parse_list(jump).map_err(|e| format!("Jump host: {e}"))?,
+        None => Vec::new(),
+    };
+    let mut previous: Option<SshClient> = None;
+    for hop in hops {
+        let user = hop.user.clone().unwrap_or_else(|| request.user.clone());
+        let port = hop.port.unwrap_or(22);
+        sink.send(SessionEvent::Status(format!(
+            "Connecting to jump host {}:{port}…",
+            hop.host
+        )));
+        let config = config_for(&hop.host, port);
+        let mut client = match previous.take() {
+            None => connect(&config).await?,
+            Some(via) => connect_via(via, &config).await?,
+        };
+        let login = Login {
+            user: &user,
+            host: &hop.host,
+            password: None,
+            target: false,
+        };
+        if !authenticate(&mut client, &login, &request, sink).await? {
+            return Err(format!("Authentication failed for jump host {user}@{}", hop.host).into());
+        }
+        previous = Some(client);
+    }
+
     sink.send(SessionEvent::Status(format!(
         "Connecting to {}:{}…",
         request.host, request.port
     )));
-    let mut config = SshConfig::new(request.host.clone(), request.port);
-    config.allow_legacy_algorithms = request.allow_legacy;
-    config.host_key_policy = HostKeyPolicy::Ask(Arc::new(UiPrompt(sink.clone())));
-    if let Some(path) = &request.known_hosts {
-        config.known_hosts = path.clone();
-    }
-
-    let mut client = connect(&config).await.map_err(describe)?;
+    let config = config_for(&request.host, request.port);
+    let mut client = match previous {
+        None => connect(&config).await?,
+        Some(via) => connect_via(via, &config).await?,
+    };
     sink.send(SessionEvent::Status("Authenticating…".into()));
-    if !authenticate(&mut client, &request, sink).await? {
+    let login = Login {
+        user: &request.user,
+        host: &request.host,
+        password: request.password.as_deref(),
+        target: true,
+    };
+    if !authenticate(&mut client, &login, &request, sink).await? {
         return Err(format!(
             "Authentication failed for {}@{}",
             request.user, request.host
-        ));
+        )
+        .into());
+    }
+
+    let (_forwards, statuses) = start_tunnels(&client, &request.tunnels).await;
+    if !statuses.is_empty() {
+        sink.send(SessionEvent::Tunnels(statuses));
     }
 
     let pty = PtyRequest {
@@ -170,7 +285,8 @@ async fn run(
         rows: request.rows.max(1),
         ..PtyRequest::default()
     };
-    let mut shell = client.open_shell(&pty).await.map_err(describe)?;
+    let agent = request.forward_agent.then(|| request.agent.clone());
+    let mut shell = client.open_shell_with(&pty, agent).await?;
     sink.send(SessionEvent::Connected);
 
     let mut buf = vec![0u8; 64 * 1024];
@@ -179,36 +295,102 @@ async fn run(
             read = shell.read(&mut buf) => match read {
                 Ok(0) => break,
                 Ok(n) => sink.send(SessionEvent::Output(buf[..n].to_vec())),
-                Err(e) => return Err(format!("Connection lost: {e}")),
+                Err(e) => return Err(Failure::lost(format!("Connection lost: {e}"))),
             },
             command = commands.recv() => match command {
                 Some(SessionCommand::Input(data)) => {
-                    shell.write(&data).await.map_err(|e| format!("Connection lost: {e}"))?;
+                    if let Err(e) = shell.write(&data).await {
+                        return Err(Failure::lost(format!("Connection lost: {e}")));
+                    }
                 }
                 Some(SessionCommand::Resize(cols, rows)) => {
                     let _ = shell.resize(cols, rows).await;
                 }
                 Some(SessionCommand::Close) | None => {
                     let _ = shell.close().await;
-                    break;
+                    let _ = client.disconnect().await;
+                    return Ok(shell.exit_status());
                 }
             },
         }
     }
     let exit_status = shell.exit_status();
+    // The channel closed without an exit status because the connection
+    // itself went away.
+    if exit_status.is_none() && client.is_closed() {
+        return Err(Failure::lost("Connection lost"));
+    }
     let _ = client.disconnect().await;
     Ok(exit_status)
 }
 
+/// Start saved tunnels, reporting each one's outcome. The forwards stop
+/// when the returned values are dropped.
+async fn start_tunnels(
+    client: &SshClient,
+    tunnels: &[Tunnel],
+) -> (Vec<Forward>, Vec<TunnelStatus>) {
+    let mut forwards = Vec::new();
+    let mut statuses = Vec::new();
+    for tunnel in tunnels {
+        let result = async {
+            let (listen_host, listen_port) = tunnel.listen_addr()?;
+            let bind = if listen_host.contains(':') {
+                format!("[{listen_host}]:{listen_port}")
+            } else {
+                format!("{listen_host}:{listen_port}")
+            };
+            let forward = match tunnel.kind {
+                TunnelKind::Local => {
+                    let (host, port) = tunnel.target_addr()?;
+                    client.forward_local(&bind, &host, port).await
+                }
+                TunnelKind::Dynamic => client.forward_dynamic(&bind).await,
+                TunnelKind::Remote => {
+                    let (host, port) = tunnel.target_addr()?;
+                    client
+                        .forward_remote(&listen_host, listen_port, &host, port)
+                        .await
+                }
+            }
+            .map_err(describe)?;
+            Ok::<_, String>(forward)
+        }
+        .await;
+        statuses.push(TunnelStatus {
+            description: tunnel.describe(),
+            result: result
+                .as_ref()
+                .map(|f| format!("listening on {}", f.listen))
+                .map_err(Clone::clone),
+        });
+        if let Ok(forward) = result {
+            forwards.push(forward);
+        }
+    }
+    (forwards, statuses)
+}
+
+/// Who to log in as on one hop.
+struct Login<'a> {
+    user: &'a str,
+    host: &'a str,
+    /// Saved or entered password to try first.
+    password: Option<&'a str>,
+    /// The destination itself (prompted passwords may be saved).
+    target: bool,
+}
+
 async fn authenticate(
-    client: &mut rooste_proto::ssh::SshClient,
+    client: &mut SshClient,
+    login: &Login<'_>,
     request: &ConnectRequest,
     sink: &EventSink,
 ) -> Result<bool, String> {
-    let user = request.user.as_str();
+    let user = login.user;
     if request.use_agent {
         match client
-            .authenticate(user, &Auth::Agent(AgentSource::Default))
+            .authenticate(user, &Auth::Agent(request.agent.clone()))
             .await
         {
             Ok(true) => return Ok(true),
@@ -227,7 +409,7 @@ async fn authenticate(
     }
 
     let mut retry = false;
-    if let Some(password) = &request.password {
+    if let Some(password) = login.password {
         if try_password(client, user, password).await? {
             return Ok(true);
         }
@@ -238,14 +420,16 @@ async fn authenticate(
     }
     for _ in 0..PROMPT_ATTEMPTS {
         let kind = PromptKind::Password {
-            user: request.user.clone(),
-            host: request.host.clone(),
+            user: user.to_owned(),
+            host: login.host.to_owned(),
         };
         let Some(password) = prompt(sink, kind, retry).await else {
             return Err("Login cancelled".into());
         };
         if try_password(client, user, &password).await? {
-            sink.send(SessionEvent::PasswordAccepted(password));
+            if login.target {
+                sink.send(SessionEvent::PasswordAccepted(password));
+            }
             return Ok(true);
         }
         retry = true;
@@ -314,10 +498,7 @@ pub fn describe(error: SshError) -> String {
         ..
     } = error
     {
-        message.push_str(
-            ". This server only supports outdated algorithms; enable \"Allow legacy algorithms\" \
-             if you trust the network.",
-        );
+        message.push_str(". This server only supports outdated algorithms.");
     }
     message
 }

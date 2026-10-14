@@ -9,7 +9,7 @@ use rooste_proto::ssh::{AgentSource, Auth, PrivateKey, SshClient, SshError, load
 const PROMPT_ATTEMPTS: usize = 3;
 const DEFAULT_KEYS: [&str; 3] = ["id_ed25519", "id_ecdsa", "id_rsa"];
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Methods {
     pub agent: bool,
     /// Explicit key files; empty means the default keys in `~/.ssh`.

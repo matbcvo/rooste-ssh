@@ -3,8 +3,9 @@
 A modern, memory-safe SSH client for Linux and Windows, written in Rust — with tabs, split panes,
 a session manager, built-in SFTP, key generator and agent.
 
-> **Status:** early development — M3 is done: a usable desktop app with saved sessions, tabs,
-> imports from PuTTY and `~/.ssh/config`, and a command-line client. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** early development — M4 is done: saved sessions, tabs and split panes, port
+> forwarding, jump hosts, agent forwarding and auto-reconnect, in the desktop app and the
+> command-line client. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Building
 
@@ -20,6 +21,7 @@ On Linux the desktop app needs the usual X11 or Wayland libraries (present on an
 ```sh
 cargo run -p rooste-cli -- user@host       # interactive shell
 cargo run -p rooste-cli -- user@host ls    # run a command
+cargo run -p rooste-cli -- -J bastion -L 5432:db:5432 -N user@host   # jump host + forward
 ```
 
 `rooste-cli` tries the SSH agent, then `~/.ssh/id_ed25519`, `id_ecdsa` and `id_rsa` (or keys given
@@ -44,7 +46,7 @@ The SSH tests run against an in-process test server, so they work without any se
 a real OpenSSH server need the Docker fixture:
 
 ```sh
-docker build -t rooste-openssh crates/rooste-testkit/docker/openssh
+docker build -t rooste-openssh -f crates/rooste-testkit/docker/openssh/Dockerfile crates/rooste-testkit/docker
 docker run -d --rm -p 2222:22 --name rooste-openssh rooste-openssh
 cargo nextest run --workspace --run-ignored only
 ```

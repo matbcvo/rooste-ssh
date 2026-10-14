@@ -110,11 +110,17 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
   profile editor, search, context menu, imports, settings, password prompt, tab closing;
   property tests for config round-trips and the `ssh_config` parser.
 
-### M4 — Power features
+### M4 — Power features ✅
 - Split panes; local, remote and dynamic (SOCKS) port forwarding; ProxyJump; agent forwarding;
   auto-reconnect; broadcast input.
 - Per-session "Allow legacy algorithms" option, ⚠ indicator on the tab, and an error message that
   offers to enable it when a server only supports legacy algorithms.
+- Also: duplicate tab, command palette (Ctrl+Shift+P), saved tunnels per profile with status in
+  the tab, and the same features in `rooste-cli` (`-J`, `-L`, `-R`, `-D`, `-A`, `-N`).
+- **Tests:** in-process and OpenSSH tests for every forward type, jump hosts and agent forwarding;
+  kittest tests for splits, broadcast, palette, auto-reconnect, the legacy retry, tunnels and
+  the tunnel editor; nightly interop against OpenSSH 9.3 / current / edge, Dropbear, and a
+  legacy-only server.
 
 ### M5 — Built-in tools
 - SFTP browser with drag and drop.

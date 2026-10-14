@@ -81,6 +81,14 @@ impl Fixture {
     }
 }
 
+/// Render a few frames. (`Harness::run` waits for the UI to go idle, which
+/// never happens while a session streams output.)
+fn settle(harness: &mut Harness<'_, RoosteApp>) {
+    for _ in 0..4 {
+        harness.step();
+    }
+}
+
 fn harness(app: RoosteApp) -> Harness<'static, RoosteApp> {
     Harness::builder()
         .with_size([1100.0, 700.0])
@@ -124,24 +132,24 @@ fn last<'a>(harness: &'a Harness<'_, RoosteApp>, label: &'a str) -> egui_kittest
 
 fn type_into(harness: &mut Harness<'_, RoosteApp>, label: &str, text: &str) {
     last(harness, label).focus();
-    harness.run();
+    settle(harness);
     last(harness, label).type_text(text);
-    harness.run();
+    settle(harness);
 }
 
 fn open_menu_item(harness: &mut Harness<'_, RoosteApp>, menu: &str, item: &str) {
     harness.get_by_label(menu).click();
-    harness.run();
+    settle(harness);
     harness.get_by_label(item).click();
-    harness.run();
+    settle(harness);
 }
 
 fn context_menu(harness: &mut Harness<'_, RoosteApp>, profile: &str, item: &str) {
     harness.get_by_label(profile).click_secondary();
-    harness.run();
+    settle(harness);
     // The welcome screen also has a "Connect" button; the menu item is last.
     last(harness, item).click();
-    harness.run();
+    settle(harness);
 }
 
 fn write(path: &Path, text: &str) {
@@ -155,7 +163,7 @@ fn quick_connect_requires_a_host() {
     let f = Fixture::new();
     let mut harness = harness(f.app(Config::default()));
     harness.get_by_label("Connect").click();
-    harness.run();
+    settle(&mut harness);
     harness.get_by_label("Enter a host name.");
     assert_eq!(harness.state().tabs().count(), 0);
 }
@@ -248,11 +256,11 @@ fn create_a_profile_in_the_editor() {
     let f = Fixture::new();
     let mut harness = harness(f.app(Config::default()));
     harness.get_by_label("➕").click();
-    harness.run();
+    settle(&mut harness);
     harness.get_by_label("New session");
 
     harness.get_by_label("Save").click();
-    harness.run();
+    settle(&mut harness);
     harness.get_by_label("Enter a host name.");
 
     type_into(&mut harness, "Name", "My server");
@@ -260,7 +268,7 @@ fn create_a_profile_in_the_editor() {
     type_into(&mut harness, "Port", "2200");
     type_into(&mut harness, "Folder", "Work/Prod");
     harness.get_by_label("Save").click();
-    harness.run();
+    settle(&mut harness);
 
     assert!(harness.state().dialog.is_none());
     harness.get_by_label("📁 Work");
@@ -324,13 +332,13 @@ fn edit_duplicate_and_delete_from_the_context_menu() {
     harness.get_by_label("Edit session");
     type_into(&mut harness, "Name", " 2");
     harness.get_by_label("Save").click();
-    harness.run();
+    settle(&mut harness);
     harness.get_by_label("router (copy) 2");
 
     context_menu(&mut harness, "router (copy) 2", "Delete…");
     harness.get_by_label("Delete the saved session \"router (copy) 2\"?");
     harness.get_by_label("Delete").click();
-    harness.run();
+    settle(&mut harness);
     assert!(harness.query_by_label("router (copy) 2").is_none());
     let saved = f.saved_config();
     assert_eq!(saved.profiles.len(), 1);
@@ -387,11 +395,11 @@ fn settings_are_saved_and_applied() {
     open_menu_item(&mut harness, "Session", "Settings…");
     assert!(matches!(harness.state().dialog, Some(Dialog::Settings(_))));
     harness.get_by_label("Light").click();
-    harness.run();
+    settle(&mut harness);
     harness.get_by_label("Copy text when selected").click();
-    harness.run();
+    settle(&mut harness);
     harness.get_by_label("Save").click();
-    harness.run();
+    settle(&mut harness);
 
     let saved = f.saved_config();
     assert_eq!(saved.settings.theme, Theme::Light);
@@ -511,9 +519,276 @@ fn tabs_open_side_by_side_and_close_with_confirmation() {
 
     // Ctrl+Shift+W asks before closing an active connection.
     harness.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::W);
-    harness.run();
+    settle(&mut harness);
     harness.get_by_label("This tab has an active connection. Close it?");
     last(&harness, "Close").click();
-    harness.run();
+    settle(&mut harness);
     assert_eq!(harness.state().tabs().count(), 1);
+}
+
+// ---- M4: power features --------------------------------------------------
+
+fn connected_count(app: &RoosteApp) -> usize {
+    app.tabs()
+        .filter(|t| t.state == TabState::Connected)
+        .count()
+}
+
+/// An app with saved-password profiles for each name, all pointing at the
+/// fixture's server.
+fn app_with(f: &Fixture, profiles: Vec<Profile>) -> RoosteApp {
+    let profiles: Vec<Profile> = profiles
+        .into_iter()
+        .map(|p| Profile {
+            save_password: true,
+            ..p
+        })
+        .collect();
+    let app = f.app(Config {
+        profiles: profiles.clone(),
+        ..Config::default()
+    });
+    for p in &profiles {
+        app.secrets().set(&p.id, TEST_PASSWORD).unwrap();
+    }
+    app
+}
+
+fn tab_text(app: &RoosteApp, index: usize) -> String {
+    app.tabs()
+        .nth(index)
+        .map(|t| t.terminal.screen_text())
+        .unwrap_or_default()
+}
+
+#[test]
+fn split_right_opens_a_second_session_beside_the_first() {
+    let f = Fixture::with_server();
+    let mut harness = harness(app_with(&f, vec![f.profile("one")]));
+    context_menu(&mut harness, "one", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+
+    open_menu_item(&mut harness, "Tab", "Split right");
+    wait_for(&mut harness, "both connected", |app| {
+        connected_count(app) == 2
+    });
+    let root = harness.state().tree.root.unwrap();
+    assert!(
+        matches!(
+            harness.state().tree.tiles.get(root),
+            Some(egui_tiles::Tile::Container(egui_tiles::Container::Linear(
+                _
+            )))
+        ),
+        "the root is now a horizontal split"
+    );
+}
+
+#[test]
+fn broadcast_input_reaches_every_tab() {
+    let f = Fixture::with_server();
+    let mut harness = harness(app_with(&f, vec![f.profile("one"), f.profile("two")]));
+    context_menu(&mut harness, "one", "Connect");
+    context_menu(&mut harness, "two", "Connect");
+    wait_for(&mut harness, "both connected", |app| {
+        connected_count(app) == 2
+    });
+
+    open_menu_item(&mut harness, "Tab", "Broadcast input to all tabs");
+    harness.get_by_label("Broadcasting input to 2 connected tabs.");
+    harness.event(egui::Event::Text("hello all".into()));
+    harness.key_press(egui::Key::Enter);
+    wait_for(&mut harness, "echo in both tabs", |app| {
+        tab_text(app, 0).contains("echo: hello all") && tab_text(app, 1).contains("echo: hello all")
+    });
+}
+
+#[test]
+fn command_palette_connects_a_session() {
+    let f = Fixture::with_server();
+    let mut harness = harness(app_with(&f, vec![f.profile("palette target")]));
+    harness.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::P);
+    settle(&mut harness);
+    harness.get_by_label("Command").type_text("conn palette");
+    settle(&mut harness);
+    harness.get_by_label("Connect: palette target");
+    harness.key_press(egui::Key::Enter);
+    settle(&mut harness);
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+    assert!(harness.state().dialog.is_none());
+}
+
+#[test]
+fn dropped_connections_reconnect_automatically() {
+    let f = Fixture::with_server();
+    let mut harness = harness(app_with(&f, vec![f.profile("flaky")]));
+    context_menu(&mut harness, "flaky", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+
+    f.net
+        .block_on(f.server.as_ref().unwrap().drop_connections());
+    wait_for(&mut harness, "reconnecting", |app| {
+        first_tab(app).is_some_and(|t| matches!(t.state, TabState::Reconnecting { .. }))
+    });
+    wait_for(&mut harness, "reconnected", |app| {
+        connected_count(app) == 1 && screen_text(app).contains("[reconnected]")
+    });
+}
+
+#[test]
+fn legacy_only_server_offers_a_retry_with_legacy_algorithms() {
+    use std::borrow::Cow;
+    let f = Fixture::new();
+    let legacy = russh::Preferred {
+        kex: Cow::Borrowed(&[russh::kex::DH_G14_SHA1]),
+        ..russh::Preferred::default()
+    };
+    let server = f.net.block_on(TestServer::start_with(legacy));
+    known_hosts::learn(
+        &f.known_hosts(),
+        "127.0.0.1",
+        server.addr.port(),
+        &server.host_key,
+    )
+    .unwrap();
+    let profile = Profile {
+        port: Some(server.addr.port()),
+        ..f.profile("old switch")
+    };
+    let id = profile.id.clone();
+    let mut harness = harness(app_with(&f, vec![profile]));
+    context_menu(&mut harness, "old switch", "Connect");
+    wait_for(&mut harness, "failure", |app| {
+        matches!(first_tab(app).map(|t| &t.state), Some(TabState::Failed(_)))
+    });
+    harness
+        .get_by_label("Allow legacy algorithms and retry")
+        .click();
+    settle(&mut harness);
+    wait_for(&mut harness, "connected with legacy", |app| {
+        connected_count(app) == 1
+    });
+    assert!(first_tab(harness.state()).unwrap().title().contains('⚠'));
+    assert!(
+        f.saved_config().profile(&id).unwrap().allow_legacy,
+        "saved on the profile"
+    );
+}
+
+#[test]
+fn saved_tunnels_start_with_the_session() {
+    use std::io::{Read, Write};
+    let f = Fixture::with_server();
+    let echo = f.net.block_on(rooste_testkit::EchoServer::start());
+    let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listen = free.local_addr().unwrap().port();
+    drop(free);
+    // A port another socket is listening on cannot be bound again.
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let taken_port = taken.local_addr().unwrap().port();
+    let profile = Profile {
+        tunnels: vec![
+            rooste_core::Tunnel {
+                kind: rooste_core::TunnelKind::Local,
+                listen: listen.to_string(),
+                target: echo.addr.to_string(),
+            },
+            rooste_core::Tunnel {
+                kind: rooste_core::TunnelKind::Local,
+                listen: taken_port.to_string(),
+                target: "127.0.0.1:1".into(),
+            },
+        ],
+        ..f.profile("tunnels")
+    };
+    let mut harness = harness(app_with(&f, vec![profile]));
+    context_menu(&mut harness, "tunnels", "Connect");
+    wait_for(&mut harness, "tunnel status", |app| {
+        first_tab(app).is_some_and(|t| t.tunnels.len() == 2)
+    });
+    let tunnels = first_tab(harness.state()).unwrap().tunnels.clone();
+    assert!(tunnels[0].result.is_ok(), "{tunnels:?}");
+    assert!(
+        tunnels[1].result.is_err(),
+        "port 1 cannot be bound: {tunnels:?}"
+    );
+
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", listen)).unwrap();
+    stream.write_all(b"via tunnel").unwrap();
+    let mut back = [0u8; 10];
+    stream.read_exact(&mut back).unwrap();
+    assert_eq!(&back, b"via tunnel");
+}
+
+#[test]
+fn jump_host_and_agent_forwarding() {
+    let f = Fixture::with_server();
+    let target = f.net.block_on(TestServer::start());
+    known_hosts::learn(
+        &f.known_hosts(),
+        "127.0.0.1",
+        target.addr.port(),
+        &target.host_key,
+    )
+    .unwrap();
+    let agent = f.net.block_on(rooste_testkit::TestAgent::start());
+    let profile = Profile {
+        port: Some(target.addr.port()),
+        proxy_jump: Some(format!(
+            "{TEST_USER}@127.0.0.1:{}",
+            f.server.as_ref().unwrap().addr.port()
+        )),
+        use_agent: true,
+        forward_agent: true,
+        ..f.profile("behind bastion")
+    };
+    let app = f
+        .app(Config {
+            profiles: vec![profile],
+            ..Config::default()
+        })
+        .with_agent(rooste_proto::ssh::AgentSource::Path(
+            agent.path().to_owned(),
+        ));
+    let mut harness = harness(app);
+    context_menu(&mut harness, "behind bastion", "Connect");
+    wait_for(&mut harness, "connected through the jump host", |app| {
+        connected_count(app) == 1 && screen_text(app).contains('$')
+    });
+    harness.event(egui::Event::Text("agent-keys".into()));
+    harness.key_press(egui::Key::Enter);
+    wait_for(&mut harness, "forwarded agent", |app| {
+        screen_text(app).contains("agent: 1 keys")
+    });
+}
+
+#[test]
+fn tunnel_editor_validates() {
+    let f = Fixture::new();
+    let mut harness = harness(f.app(Config::default()));
+    harness.get_by_label("➕").click();
+    settle(&mut harness);
+    type_into(&mut harness, "Host", "h.example.com");
+    harness.get_by_label("Add tunnel").click();
+    settle(&mut harness);
+    type_into(&mut harness, "Listen", "8080");
+    type_into(&mut harness, "Target", "nohost");
+    harness.get_by_label("Save").click();
+    settle(&mut harness);
+    assert!(
+        harness.state().dialog.is_some(),
+        "invalid tunnel keeps the editor open"
+    );
+    assert!(
+        harness
+            .query_all_by_label("Tunnel L 8080 → nohost: `nohost` has an invalid port")
+            .next()
+            .is_some()
+    );
+    type_into(&mut harness, "Target", ":5432");
+    harness.get_by_label("Save").click();
+    settle(&mut harness);
+    assert!(harness.state().dialog.is_none());
+    let saved = f.saved_config();
+    assert_eq!(saved.profiles[0].tunnels[0].target, "nohost:5432");
 }

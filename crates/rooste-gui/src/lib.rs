@@ -6,6 +6,7 @@ pub mod dialogs;
 pub mod fonts;
 pub mod keys;
 pub mod manager;
+pub mod palette;
 pub mod secrets;
 pub mod session;
 pub mod tab;

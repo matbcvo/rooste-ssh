@@ -1,0 +1,98 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  interop:
+    name: Interop (OpenSSH versions, Dropbear, legacy server)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Start servers
+        working-directory: crates/rooste-testkit/docker
+        run: |
+          docker build -t interop-openssh-old --build-arg ALPINE=3.18 -f openssh/Dockerfile .
+          docker build -t interop-openssh -f openssh/Dockerfile .
+          docker build -t interop-openssh-edge --build-arg ALPINE=edge -f openssh/Dockerfile .
+          docker build -t interop-dropbear -f dropbear/Dockerfile .
+          docker build -t interop-legacy -f legacy/Dockerfile .
+          docker run -d -p 2301:22 interop-openssh-old
+          docker run -d -p 2302:22 interop-openssh
+          docker run -d -p 2303:22 interop-openssh-edge
+          docker run -d -p 2304:22 interop-dropbear
+          docker run -d -p 2305:22 interop-legacy
+          for port in 2301 2302 2303 2304 2305; do
+            for i in $(seq 1 30); do nc -z 127.0.0.1 $port && break; sleep 1; done
+          done
+          for image in interop-openssh-old interop-openssh interop-openssh-edge; do
+            docker run --rm --entrypoint ssh $image -V
+          done
+      - run: cargo test -p rooste-proto --test interop -- --ignored --nocapture
+        env:
+          ROOSTE_INTEROP_SERVERS: openssh-old=127.0.0.1:2301,openssh=127.0.0.1:2302,openssh-edge=127.0.0.1:2303,dropbear=127.0.0.1:2304
+          ROOSTE_LEGACY_ADDR: 127.0.0.1:2305
+
+  toolchains:
+    name: Test (${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [beta, nightly]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [terminal, ssh_config, putty_session, destination]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=300
+      - name: Upload crash inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+
+  bench:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Criterion compares against the previous run's results.
+      - uses: actions/cache@v4
+        with:
+          path: target/criterion
+          key: criterion-${{ github.run_id }}
+          restore-keys: criterion-
+      - run: cargo bench -p rooste-term

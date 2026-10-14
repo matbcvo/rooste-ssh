@@ -14,8 +14,10 @@
 
 mod agent;
 pub mod algorithms;
+mod forward;
 pub mod known_hosts;
 
+use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -31,6 +33,7 @@ use zeroize::Zeroizing;
 pub use agent::AgentSource;
 #[cfg(windows)]
 pub use agent::OPENSSH_AGENT_PIPE;
+pub use forward::{Forward, ForwardKind};
 pub use known_hosts::{HostKeyPolicy, HostKeyPrompt, HostKeyStatus, UnknownHostKey};
 pub use russh::keys::{PrivateKey, PublicKey};
 
@@ -73,6 +76,14 @@ pub enum SshError {
     },
     #[error("the key {} is encrypted and needs a passphrase", .0.display())]
     KeyEncrypted(PathBuf),
+    #[error("could not set up forwarding on {bind}")]
+    Forward {
+        bind: String,
+        #[source]
+        source: io::Error,
+    },
+    #[error("authentication must finish before port forwarding starts")]
+    AuthAfterForwarding,
     #[error(transparent)]
     Protocol(#[from] russh::Error),
 }
@@ -175,12 +186,18 @@ enum HostKeyFailure {
     KnownHosts(keys::Error),
 }
 
+/// Remote forwards: (address, port) the server listens on -> local target.
+type Routes = Arc<Mutex<HashMap<(String, u32), (String, u16)>>>;
+
 struct ClientHandler {
     host: String,
     port: u16,
     known_hosts: PathBuf,
     policy: HostKeyPolicy,
     failure: Arc<Mutex<Option<HostKeyFailure>>>,
+    routes: Routes,
+    /// Agent that forwarded agent connections are relayed to.
+    agent: Arc<Mutex<Option<AgentSource>>>,
 }
 
 impl ClientHandler {
@@ -237,41 +254,152 @@ impl client::Handler for ClientHandler {
             keys::PublicKeyOrCertificate::Certificate(_) => Ok(false),
         }
     }
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<Msg>,
+        connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let target = lock(&self.routes)
+            .get(&(connected_address.to_owned(), connected_port))
+            .cloned();
+        let Some((host, port)) = target else {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        };
+        reply.accept().await;
+        tokio::spawn(async move {
+            if let Ok(mut tcp) = tokio::net::TcpStream::connect((host.as_str(), port)).await {
+                let mut stream = channel.into_stream();
+                let _ = tokio::io::copy_bidirectional(&mut stream, &mut tcp).await;
+            }
+        });
+        Ok(())
+    }
+
+    async fn server_channel_open_agent_forward(
+        &mut self,
+        channel: russh::Channel<Msg>,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let Some(source) = lock(&self.agent).clone() else {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        };
+        reply.accept().await;
+        tokio::spawn(async move {
+            if let Ok(mut agent) = agent::connect_stream(&source).await {
+                let mut stream = channel.into_stream();
+                let _ = tokio::io::copy_bidirectional(&mut stream, &mut agent).await;
+            }
+        });
+        Ok(())
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Connect to an SSH server and verify its host key.
 pub async fn connect(config: &SshConfig) -> Result<SshClient, SshError> {
-    let failure = Arc::new(Mutex::new(None));
-    let handler = ClientHandler {
-        host: config.host.clone(),
-        port: config.port,
-        known_hosts: config.known_hosts.clone(),
-        policy: config.host_key_policy.clone(),
-        failure: failure.clone(),
-    };
-    let russh_config = Arc::new(client::Config {
-        preferred: algorithms::preferred(config.allow_legacy_algorithms),
-        keepalive_interval: config.keepalive_interval,
-        nodelay: true,
-        ..Default::default()
-    });
+    let parts = Parts::default();
+    let connecting = client::connect(
+        parts.russh_config(config),
+        (config.host.as_str(), config.port),
+        parts.handler(config),
+    );
+    parts.finish(config, connecting, None).await
+}
 
-    let connecting = client::connect(russh_config, (config.host.as_str(), config.port), handler);
-    let result = tokio::time::timeout(config.connect_timeout, connecting)
+/// Connect to `config`'s server through an authenticated jump host (as
+/// OpenSSH `ProxyJump` does). The jump connection stays open as long as the
+/// returned client.
+pub async fn connect_via(jump: SshClient, config: &SshConfig) -> Result<SshClient, SshError> {
+    let channel = jump
+        .handle
+        .channel_open_direct_tcpip(config.host.as_str(), config.port.into(), "127.0.0.1", 0)
         .await
-        .map_err(|_| SshError::Timeout)?;
-    let handle = result.map_err(|e| {
-        let recorded = failure.lock().unwrap_or_else(|e| e.into_inner()).take();
-        match recorded {
+        .map_err(|e| match e {
+            russh::Error::ChannelOpenFailure(_) => SshError::Connect(io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                format!(
+                    "the jump host could not reach {}:{}",
+                    config.host, config.port
+                ),
+            )),
+            other => SshError::Protocol(other),
+        })?;
+    let parts = Parts::default();
+    let connecting = client::connect_stream(
+        parts.russh_config(config),
+        channel.into_stream(),
+        parts.handler(config),
+    );
+    parts.finish(config, connecting, Some(Box::new(jump))).await
+}
+
+/// State shared between a connection's handler and its client.
+#[derive(Default)]
+struct Parts {
+    failure: Arc<Mutex<Option<HostKeyFailure>>>,
+    routes: Routes,
+    agent: Arc<Mutex<Option<AgentSource>>>,
+}
+
+impl Parts {
+    fn handler(&self, config: &SshConfig) -> ClientHandler {
+        ClientHandler {
+            host: config.host.clone(),
+            port: config.port,
+            known_hosts: config.known_hosts.clone(),
+            policy: config.host_key_policy.clone(),
+            failure: self.failure.clone(),
+            routes: self.routes.clone(),
+            agent: self.agent.clone(),
+        }
+    }
+
+    fn russh_config(&self, config: &SshConfig) -> Arc<client::Config> {
+        Arc::new(client::Config {
+            preferred: algorithms::preferred(config.allow_legacy_algorithms),
+            keepalive_interval: config.keepalive_interval,
+            nodelay: true,
+            ..Default::default()
+        })
+    }
+
+    async fn finish(
+        self,
+        config: &SshConfig,
+        connecting: impl std::future::Future<Output = Result<Handle<ClientHandler>, russh::Error>>,
+        via: Option<Box<SshClient>>,
+    ) -> Result<SshClient, SshError> {
+        let result = tokio::time::timeout(config.connect_timeout, connecting)
+            .await
+            .map_err(|_| SshError::Timeout)?;
+        let handle = result.map_err(|e| match lock(&self.failure).take() {
             Some(failure) => host_key_error(&config.host, failure),
             None => connect_error(e, config.allow_legacy_algorithms),
-        }
-    })?;
-
-    Ok(SshClient {
-        handle,
-        allow_legacy_algorithms: config.allow_legacy_algorithms,
-    })
+        })?;
+        Ok(SshClient {
+            handle: Arc::new(handle),
+            allow_legacy_algorithms: config.allow_legacy_algorithms,
+            routes: self.routes,
+            agent: self.agent,
+            _via: via,
+        })
+    }
 }
 
 fn host_key_error(host: &str, failure: HostKeyFailure) -> SshError {
@@ -301,8 +429,12 @@ fn connect_error(error: russh::Error, legacy_enabled: bool) -> SshError {
 
 /// A connected SSH session. Authenticate, then open shells or run commands.
 pub struct SshClient {
-    handle: Handle<ClientHandler>,
+    handle: Arc<Handle<ClientHandler>>,
     allow_legacy_algorithms: bool,
+    routes: Routes,
+    agent: Arc<Mutex<Option<AgentSource>>>,
+    /// Jump host this connection is tunneled through.
+    _via: Option<Box<SshClient>>,
 }
 
 impl fmt::Debug for SshClient {
@@ -319,7 +451,7 @@ impl SshClient {
     pub async fn authenticate(&mut self, user: &str, auth: &Auth) -> Result<bool, SshError> {
         match auth {
             Auth::Password(password) => Ok(self
-                .handle
+                .handle_mut()?
                 .authenticate_password(user, password.as_str())
                 .await?
                 .success()),
@@ -327,7 +459,7 @@ impl SshClient {
                 let hash = self.rsa_hash(key.algorithm()).await?;
                 let key = PrivateKeyWithHashAlg::new(key.clone(), hash);
                 Ok(self
-                    .handle
+                    .handle_mut()?
                     .authenticate_publickey(user, key)
                     .await?
                     .success())
@@ -350,7 +482,7 @@ impl SshClient {
             };
             let hash = self.rsa_hash(key.algorithm()).await?;
             let result = self
-                .handle
+                .handle_mut()?
                 .authenticate_publickey_with(user, key, hash, &mut agent)
                 .await
                 .map_err(|e| SshError::Agent(e.to_string()))?;
@@ -359,6 +491,17 @@ impl SshClient {
             }
         }
         Ok(false)
+    }
+
+    /// Whether the connection has ended.
+    pub fn is_closed(&self) -> bool {
+        self.handle.is_closed()
+    }
+
+    /// Exclusive access for authentication, which must happen before any
+    /// forwarding task shares the connection.
+    fn handle_mut(&mut self) -> Result<&mut Handle<ClientHandler>, SshError> {
+        Arc::get_mut(&mut self.handle).ok_or(SshError::AuthAfterForwarding)
     }
 
     /// Signature hash for an RSA key: SHA-2 unless the server only supports
@@ -376,7 +519,18 @@ impl SshClient {
 
     /// Open an interactive shell on a pseudo-terminal.
     pub async fn open_shell(&self, pty: &PtyRequest) -> Result<SshShell, SshError> {
+        self.open_shell_with(pty, None).await
+    }
+
+    /// Open a shell, optionally forwarding the given SSH agent to it.
+    pub async fn open_shell_with(
+        &self,
+        pty: &PtyRequest,
+        forward_agent: Option<AgentSource>,
+    ) -> Result<SshShell, SshError> {
         let channel = self.handle.channel_open_session().await?;
+        self.request_agent_forwarding(&channel, forward_agent)
+            .await?;
         channel
             .request_pty(
                 false,
@@ -400,9 +554,32 @@ impl SshClient {
         })
     }
 
+    async fn request_agent_forwarding(
+        &self,
+        channel: &russh::Channel<Msg>,
+        forward_agent: Option<AgentSource>,
+    ) -> Result<(), SshError> {
+        if let Some(source) = forward_agent {
+            *lock(&self.agent) = Some(source);
+            channel.agent_forward(false).await?;
+        }
+        Ok(())
+    }
+
     /// Run a command without a terminal and collect its output.
     pub async fn exec(&self, command: &str) -> Result<ExecOutput, SshError> {
+        self.exec_with(command, None).await
+    }
+
+    /// Run a command, optionally forwarding the given SSH agent to it.
+    pub async fn exec_with(
+        &self,
+        command: &str,
+        forward_agent: Option<AgentSource>,
+    ) -> Result<ExecOutput, SshError> {
         let mut channel = self.handle.channel_open_session().await?;
+        self.request_agent_forwarding(&channel, forward_agent)
+            .await?;
         channel.exec(true, command).await?;
         let mut output = ExecOutput::default();
         while let Some(msg) = channel.wait().await {

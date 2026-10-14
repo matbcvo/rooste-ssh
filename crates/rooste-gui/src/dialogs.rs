@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use egui::{Id, Modal, Ui};
-use rooste_core::{Profile, Protocol, Settings, Theme};
+use rooste_core::{Profile, Protocol, Settings, Theme, Tunnel, TunnelKind};
 use rooste_proto::ssh::UnknownHostKey;
 
 use crate::session::PromptKind;
@@ -102,6 +102,11 @@ impl ProfileEditor {
         let trimmed = |s: &str| (!s.trim().is_empty()).then(|| s.trim().to_owned());
         profile.key_file = trimmed(&self.key_file).map(PathBuf::from);
         profile.proxy_jump = trimmed(&self.proxy_jump);
+        for tunnel in &profile.tunnels {
+            tunnel
+                .validate()
+                .map_err(|e| format!("Tunnel {}: {e}", tunnel.describe()))?;
+        }
         profile.tags = self
             .tags
             .split(',')
@@ -188,6 +193,9 @@ impl ProfileEditor {
                             )
                     });
                     text(ui, "Jump host", &mut self.proxy_jump);
+                    labeled(ui, "", |ui| {
+                        ui.checkbox(&mut p.forward_agent, "Forward SSH agent")
+                    });
                     text(ui, "Tags", &mut self.tags);
                     labeled(ui, "Notes", |ui| {
                         ui.add(
@@ -197,6 +205,7 @@ impl ProfileEditor {
                         )
                     });
                 });
+            tunnels_ui(ui, &mut self.profile.tunnels);
             if let Some(error) = &self.error {
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
@@ -212,6 +221,58 @@ impl ProfileEditor {
             }
         });
         decision
+    }
+}
+
+fn tunnels_ui(ui: &mut Ui, tunnels: &mut Vec<Tunnel>) {
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new("Port forwarding").strong());
+    let mut remove = None;
+    for (i, tunnel) in tunnels.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt(("tunnel-kind", i))
+                .width(80.0)
+                .selected_text(match tunnel.kind {
+                    TunnelKind::Local => "Local",
+                    TunnelKind::Remote => "Remote",
+                    TunnelKind::Dynamic => "SOCKS",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut tunnel.kind, TunnelKind::Local, "Local");
+                    ui.selectable_value(&mut tunnel.kind, TunnelKind::Remote, "Remote");
+                    ui.selectable_value(&mut tunnel.kind, TunnelKind::Dynamic, "SOCKS");
+                });
+            ui.add(
+                egui::TextEdit::singleline(&mut tunnel.listen)
+                    .hint_text("listen port")
+                    .desired_width(110.0),
+            )
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Listen"));
+            if tunnel.kind != TunnelKind::Dynamic {
+                ui.label("→");
+                ui.add(
+                    egui::TextEdit::singleline(&mut tunnel.target)
+                        .hint_text("host:port")
+                        .desired_width(150.0),
+                )
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Target")
+                });
+            }
+            if ui
+                .small_button("✕")
+                .on_hover_text("Remove tunnel")
+                .clicked()
+            {
+                remove = Some(i);
+            }
+        });
+    }
+    if let Some(i) = remove {
+        tunnels.remove(i);
+    }
+    if ui.button("Add tunnel").clicked() {
+        tunnels.push(Tunnel::default());
     }
 }
 
@@ -264,6 +325,12 @@ impl SettingsEditor {
                     });
                     labeled(ui, "", |ui| {
                         ui.checkbox(&mut s.confirm_close, "Ask before closing a connected tab")
+                    });
+                    labeled(ui, "", |ui| {
+                        ui.checkbox(
+                            &mut s.auto_reconnect,
+                            "Reconnect automatically when a connection drops",
+                        )
                     });
                 });
             let (save, cancel) = buttons(ui, "Save");

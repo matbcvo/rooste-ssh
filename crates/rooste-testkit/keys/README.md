@@ -9,4 +9,4 @@ These keys exist only for automated tests. They are public, so **never** use the
 | `id_rsa` | RSA 3072 client key |
 | `host_ed25519` | Host key of the in-process test server |
 
-The client public keys are also in `../docker/openssh/authorized_keys`.
+The client public keys are also in `../docker/authorized_keys`.

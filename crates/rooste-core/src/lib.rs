@@ -3,6 +3,7 @@
 //! clients, and password storage.
 
 pub mod config;
+pub mod destination;
 pub mod import;
 pub mod profile;
 pub mod secrets;
@@ -13,8 +14,9 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 pub use config::{Config, ConfigLocation, Settings, Theme};
+pub use destination::Destination;
 pub use import::expand_tilde;
-pub use profile::Profile;
+pub use profile::{Profile, Tunnel, TunnelKind};
 pub use secrets::{MemoryStore, SecretStore};
 
 /// Connection protocol of a saved session.
