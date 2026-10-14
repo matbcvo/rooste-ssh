@@ -83,35 +83,40 @@ pub fn show(
     commands: &[(String, Command)],
 ) -> Decision<Command> {
     let mut decision = Decision::Pending;
-    let response = Modal::new(Id::new("command-palette")).show(ctx, |ui| {
-        ui.set_width(420.0);
-        let edit = ui.add(
-            egui::TextEdit::singleline(query)
-                .hint_text("Type a command or session name")
-                .desired_width(f32::INFINITY),
-        );
-        edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Command"));
-        edit.request_focus();
-        let matches = filter(commands, query);
-        if ui.input(|i| i.key_pressed(egui::Key::Enter))
-            && let Some((_, command)) = matches.first()
-        {
-            decision = Decision::Accept(command.clone());
-        }
-        ui.separator();
-        egui::ScrollArea::vertical()
-            .max_height(300.0)
-            .show(ui, |ui| {
-                if matches.is_empty() {
-                    ui.weak("No matching commands");
-                }
-                for (label, command) in matches {
-                    if ui.selectable_label(false, label).clicked() {
-                        decision = Decision::Accept(command.clone());
-                    }
-                }
+    let response = Modal::new(Id::new("command-palette"))
+        .frame(crate::theme::dialog_frame(ctx))
+        .show(ctx, |ui| {
+            ui.set_width(420.0);
+            let edit = ui.add(
+                egui::TextEdit::singleline(query)
+                    .margin(crate::theme::FIELD_MARGIN)
+                    .hint_text("Type a command or session name")
+                    .desired_width(f32::INFINITY),
+            );
+            edit.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Command")
             });
-    });
+            edit.request_focus();
+            let matches = filter(commands, query);
+            if ui.input(|i| i.key_pressed(egui::Key::Enter))
+                && let Some((_, command)) = matches.first()
+            {
+                decision = Decision::Accept(command.clone());
+            }
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .max_height(300.0)
+                .show(ui, |ui| {
+                    if matches.is_empty() {
+                        ui.weak("No matching commands");
+                    }
+                    for (label, command) in matches {
+                        if ui.selectable_label(false, label).clicked() {
+                            decision = Decision::Accept(command.clone());
+                        }
+                    }
+                });
+        });
     if decision == Decision::Pending
         && (response.should_close() || ctx.input(|i| i.key_pressed(egui::Key::Escape)))
     {

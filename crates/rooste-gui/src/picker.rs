@@ -151,12 +151,19 @@ pub fn path_row(
     kind: PickKind,
 ) -> egui::Response {
     let label = ui.label(label);
+    let size = egui::vec2(crate::theme::FIELD_WIDTH, ui.spacing().interact_size.y);
+    let layout = egui::Layout::right_to_left(egui::Align::Center);
     let response = ui
-        .horizontal(|ui| {
+        .allocate_ui_with_layout(size, layout, |ui| {
+            let picked = picker.button(ui, id, kind, value);
             let response = ui
-                .add(egui::TextEdit::singleline(value).desired_width(250.0))
+                .add(
+                    egui::TextEdit::singleline(value)
+                        .margin(crate::theme::FIELD_MARGIN)
+                        .desired_width(f32::INFINITY),
+                )
                 .labelled_by(label.id);
-            if let Some(path) = picker.button(ui, id, kind, value) {
+            if let Some(path) = picked {
                 *value = path.display().to_string();
             }
             response

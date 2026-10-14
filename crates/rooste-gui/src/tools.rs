@@ -14,8 +14,9 @@ fn field(ui: &mut Ui, label: &str, value: &mut String, password: bool) -> egui::
     let response = ui
         .add(
             egui::TextEdit::singleline(value)
+                .margin(crate::theme::FIELD_MARGIN)
                 .password(password)
-                .desired_width(320.0),
+                .desired_width(crate::theme::FIELD_WIDTH),
         )
         .labelled_by(label.id);
     ui.end_row();
@@ -83,71 +84,75 @@ impl KeyGenerator {
 
     pub fn show(&mut self, ctx: &egui::Context, picker: &mut Picker) -> Decision<()> {
         let mut decision = Decision::Pending;
-        Modal::new(Id::new("key-generator")).show(ctx, |ui| {
-            ui.heading("Key generator");
-            if let Some((line, path)) = &self.result {
-                ui.label(format!("Saved to {path} and {path}.pub."));
-                ui.label("Add this public key to ~/.ssh/authorized_keys on your servers:");
-                let mut text = line.clone();
-                ui.add(
-                    egui::TextEdit::multiline(&mut text)
-                        .desired_rows(3)
-                        .desired_width(420.0),
-                );
-                ui.horizontal(|ui| {
-                    if ui.button("Copy public key").clicked() {
-                        ui.ctx().copy_text(line.clone());
-                    }
-                    if ui.button("Close").clicked() {
-                        decision = Decision::Accept(());
-                    }
-                });
-                return;
-            }
-            egui::Grid::new("keygen")
-                .num_columns(2)
-                .spacing([12.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label("Type");
-                    let before = self.kind;
-                    egui::ComboBox::from_id_salt("key-type")
-                        .selected_text(self.kind.label())
-                        .show_ui(ui, |ui| {
-                            for kind in KeyType::ALL {
-                                ui.selectable_value(&mut self.kind, kind, kind.label());
-                            }
-                        });
-                    if self.kind != before {
-                        self.path = ssh_dir().join(self.kind.file_name()).display().to_string();
-                    }
-                    ui.end_row();
-                    field(ui, "Comment", &mut self.comment, false);
-                    field(ui, "Passphrase", &mut self.passphrase, true);
-                    field(ui, "Repeat passphrase", &mut self.confirm, true);
-                    path_row(
-                        ui,
-                        "Save as",
-                        &mut self.path,
-                        picker,
-                        PickId::KeyGenSave,
-                        PickKind::SaveFile,
+        Modal::new(Id::new("key-generator"))
+            .frame(crate::theme::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                ui.heading("Key generator");
+                ui.add_space(10.0);
+                if let Some((line, path)) = &self.result {
+                    ui.label(format!("Saved to {path} and {path}.pub."));
+                    ui.label("Add this public key to ~/.ssh/authorized_keys on your servers:");
+                    let mut text = line.clone();
+                    ui.add(
+                        egui::TextEdit::multiline(&mut text)
+                            .margin(crate::theme::FIELD_MARGIN)
+                            .desired_rows(3)
+                            .desired_width(420.0),
                     );
+                    crate::dialogs::footer(ui, |ui| {
+                        if ui.button("Close").clicked() {
+                            decision = Decision::Accept(());
+                        }
+                        if ui.button("Copy public key").clicked() {
+                            ui.ctx().copy_text(line.clone());
+                        }
+                    });
+                    return;
+                }
+                egui::Grid::new("keygen")
+                    .num_columns(2)
+                    .spacing(crate::theme::FORM_SPACING)
+                    .show(ui, |ui| {
+                        ui.label("Type");
+                        let before = self.kind;
+                        egui::ComboBox::from_id_salt("key-type")
+                            .selected_text(self.kind.label())
+                            .show_ui(ui, |ui| {
+                                for kind in KeyType::ALL {
+                                    ui.selectable_value(&mut self.kind, kind, kind.label());
+                                }
+                            });
+                        if self.kind != before {
+                            self.path = ssh_dir().join(self.kind.file_name()).display().to_string();
+                        }
+                        ui.end_row();
+                        field(ui, "Comment", &mut self.comment, false);
+                        field(ui, "Passphrase", &mut self.passphrase, true);
+                        field(ui, "Repeat passphrase", &mut self.confirm, true);
+                        path_row(
+                            ui,
+                            "Save as",
+                            &mut self.path,
+                            picker,
+                            PickId::KeyGenSave,
+                            PickKind::SaveFile,
+                        );
+                    });
+                if self.passphrase.is_empty() {
+                    ui.weak("Without a passphrase, anyone who gets the file can use the key.");
+                }
+                if let Some(error) = &self.error {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                }
+                crate::dialogs::footer(ui, |ui| {
+                    if ui.button("Cancel").clicked() {
+                        decision = Decision::Cancel;
+                    }
+                    if ui.button("Generate").clicked() {
+                        self.generate();
+                    }
                 });
-            if self.passphrase.is_empty() {
-                ui.weak("Without a passphrase, anyone who gets the file can use the key.");
-            }
-            if let Some(error) = &self.error {
-                ui.colored_label(ui.visuals().error_fg_color, error);
-            }
-            ui.horizontal(|ui| {
-                if ui.button("Generate").clicked() {
-                    self.generate();
-                }
-                if ui.button("Cancel").clicked() {
-                    decision = Decision::Cancel;
-                }
             });
-        });
         decision
     }
 }
@@ -200,57 +205,62 @@ impl KeyConverter {
 
     pub fn show(&mut self, ctx: &egui::Context, picker: &mut Picker) -> Decision<()> {
         let mut decision = Decision::Pending;
-        Modal::new(Id::new("key-converter")).show(ctx, |ui| {
-            ui.heading("Convert key");
-            ui.label("PuTTY keys (.ppk) become OpenSSH keys, and OpenSSH keys become .ppk files.");
-            egui::Grid::new("convert")
-                .num_columns(2)
-                .spacing([12.0, 6.0])
-                .show(ui, |ui| {
-                    let input = path_row(
-                        ui,
-                        "Key file",
-                        &mut self.input,
-                        picker,
-                        PickId::ConvertInput,
-                        PickKind::OpenFile,
-                    );
-                    if input.changed() && self.output.is_empty() {
-                        // Suggest an output name next to the input.
+        Modal::new(Id::new("key-converter"))
+            .frame(crate::theme::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                ui.heading("Convert key");
+                ui.add_space(10.0);
+                ui.label(
+                    "PuTTY keys (.ppk) become OpenSSH keys, and OpenSSH keys become .ppk files.",
+                );
+                egui::Grid::new("convert")
+                    .num_columns(2)
+                    .spacing(crate::theme::FORM_SPACING)
+                    .show(ui, |ui| {
+                        let input = path_row(
+                            ui,
+                            "Key file",
+                            &mut self.input,
+                            picker,
+                            PickId::ConvertInput,
+                            PickKind::OpenFile,
+                        );
+                        if input.changed() && self.output.is_empty() {
+                            // Suggest an output name next to the input.
+                        }
+                        field(ui, "Passphrase", &mut self.passphrase, true);
+                        path_row(
+                            ui,
+                            "Save as",
+                            &mut self.output,
+                            picker,
+                            PickId::ConvertOutput,
+                            PickKind::SaveFile,
+                        );
+                        field(ui, "New passphrase", &mut self.new_passphrase, true);
+                    });
+                if self.output.trim().is_empty() && !self.input.trim().is_empty() {
+                    let input = self.input.trim();
+                    self.output = match input.strip_suffix(".ppk") {
+                        Some(stem) => stem.to_owned(),
+                        None => format!("{input}.ppk"),
+                    };
+                }
+                if let Some(done) = &self.done {
+                    ui.label(done);
+                }
+                if let Some(error) = &self.error {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                }
+                crate::dialogs::footer(ui, |ui| {
+                    if ui.button("Close").clicked() {
+                        decision = Decision::Cancel;
                     }
-                    field(ui, "Passphrase", &mut self.passphrase, true);
-                    path_row(
-                        ui,
-                        "Save as",
-                        &mut self.output,
-                        picker,
-                        PickId::ConvertOutput,
-                        PickKind::SaveFile,
-                    );
-                    field(ui, "New passphrase", &mut self.new_passphrase, true);
+                    if ui.button("Convert").clicked() {
+                        self.convert();
+                    }
                 });
-            if self.output.trim().is_empty() && !self.input.trim().is_empty() {
-                let input = self.input.trim();
-                self.output = match input.strip_suffix(".ppk") {
-                    Some(stem) => stem.to_owned(),
-                    None => format!("{input}.ppk"),
-                };
-            }
-            if let Some(done) = &self.done {
-                ui.label(done);
-            }
-            if let Some(error) = &self.error {
-                ui.colored_label(ui.visuals().error_fg_color, error);
-            }
-            ui.horizontal(|ui| {
-                if ui.button("Convert").clicked() {
-                    self.convert();
-                }
-                if ui.button("Close").clicked() {
-                    decision = Decision::Cancel;
-                }
             });
-        });
         decision
     }
 }
@@ -284,8 +294,9 @@ impl AgentWindow {
     ) -> (Decision<()>, Option<AgentAction>) {
         let mut decision = Decision::Pending;
         let mut action = None;
-        Modal::new(Id::new("agent")).show(ctx, |ui| {
-            ui.heading("SSH agent");
+        Modal::new(Id::new("agent")).frame(crate::theme::dialog_frame(ctx)).show(ctx, |ui| {
+ui.heading("SSH agent");
+ui.add_space(10.0);
             match agent {
                 None => {
                     ui.label("The built-in agent holds your keys in memory and offers them when you log in.");
@@ -316,7 +327,7 @@ impl AgentWindow {
                         });
                     }
                     ui.separator();
-                    egui::Grid::new("agent-load").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                    egui::Grid::new("agent-load").num_columns(2).spacing(crate::theme::FORM_SPACING).show(ui, |ui| {
                         path_row(ui, "Key file", &mut self.key_file, picker, PickId::AgentKeyFile, PickKind::OpenFile);
                         field(ui, "Passphrase", &mut self.passphrase, true);
                     });
@@ -333,11 +344,13 @@ impl AgentWindow {
             if let Some(error) = &self.error {
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
-            ui.add_space(6.0);
-            if ui.button("Close").clicked() {
-                decision = Decision::Cancel;
-            }
-            ui.label(RichText::new("Keys are kept only while rooste-ssh runs.").small().weak());
+ui.add_space(6.0);
+ui.label(RichText::new("Keys are kept only while rooste-ssh runs.").small().weak());
+crate::dialogs::footer(ui, |ui| {
+    if ui.button("Close").clicked() {
+        decision = Decision::Cancel;
+    }
+});
         });
         (decision, action)
     }

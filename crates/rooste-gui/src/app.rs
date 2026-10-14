@@ -148,6 +148,14 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
         false
     }
 
+    fn tab_bar_height(&self, _style: &egui::Style) -> f32 {
+        30.0
+    }
+
+    fn tab_title_spacing(&self, _visuals: &egui::Visuals) -> f32 {
+        12.0
+    }
+
     fn simplification_options(&self) -> SimplificationOptions {
         SimplificationOptions {
             all_panes_must_have_tabs: true,
@@ -711,6 +719,7 @@ impl RoosteApp {
         self.picker.poll();
         if self.applied_theme != Some(self.config.settings.theme) {
             ctx.set_visuals(theme::visuals(self.config.settings.theme));
+            ctx.all_styles_mut(theme::spacing);
             self.applied_theme = Some(self.config.settings.theme);
         }
 
@@ -941,15 +950,23 @@ impl RoosteApp {
     fn welcome(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(24.0);
+            ui.add_space(48.0);
             ui.vertical_centered(|ui| {
                 ui.heading("rooste-ssh");
+                ui.add_space(4.0);
                 ui.label(RichText::new("Double-click a saved session, or connect quickly:").weak());
             });
-            ui.add_space(12.0);
-            if self.quick_form(ui) {
-                self.quick_connect(&ctx);
-            }
+            ui.add_space(24.0);
+            // Center the form, with at least a small gap from the panel edge.
+            let indent = ((ui.available_width() - 420.0) / 2.0).max(16.0);
+            ui.horizontal(|ui| {
+                ui.add_space(indent);
+                ui.vertical(|ui| {
+                    if self.quick_form(ui) {
+                        self.quick_connect(&ctx);
+                    }
+                });
+            });
         });
     }
 
@@ -958,13 +975,14 @@ impl RoosteApp {
         let mut submit = false;
         egui::Grid::new("quick-connect")
             .num_columns(2)
-            .spacing([12.0, 8.0])
+            .spacing(crate::theme::FORM_SPACING)
             .show(ui, |ui| {
                 let mut field = |ui: &mut Ui, label: &str, value: &mut String, password: bool| {
                     let label = ui.label(label);
                     let edit = egui::TextEdit::singleline(value)
+                        .margin(crate::theme::FIELD_MARGIN)
                         .password(password)
-                        .desired_width(280.0);
+                        .desired_width(crate::theme::FIELD_WIDTH);
                     let response = ui.add(edit).labelled_by(label.id);
                     submit |=
                         response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -1137,16 +1155,18 @@ impl RoosteApp {
             }
             Dialog::QuickConnect => {
                 let mut keep = true;
-                egui::Modal::new(egui::Id::new("quick-connect-dialog")).show(ctx, |ui| {
-                    ui.heading("Quick connect");
-                    ui.add_space(6.0);
-                    if self.quick_form(ui) && self.quick_connect(ctx) {
-                        keep = false;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        keep = false;
-                    }
-                });
+                egui::Modal::new(egui::Id::new("quick-connect-dialog"))
+                    .frame(crate::theme::dialog_frame(ctx))
+                    .show(ctx, |ui| {
+                        ui.heading("Quick connect");
+                        ui.add_space(10.0);
+                        if self.quick_form(ui) && self.quick_connect(ctx) {
+                            keep = false;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            keep = false;
+                        }
+                    });
                 keep
             }
         };

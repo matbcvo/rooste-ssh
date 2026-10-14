@@ -350,8 +350,11 @@ impl FilesPanel {
                 let cwd = self.cwd.clone();
                 self.open(&cwd);
             }
-            let path = ui
-                .add(egui::TextEdit::singleline(&mut self.path_input).desired_width(f32::INFINITY));
+            let path = ui.add(
+                egui::TextEdit::singleline(&mut self.path_input)
+                    .margin(crate::theme::FIELD_MARGIN)
+                    .desired_width(f32::INFINITY),
+            );
             path.widget_info(|| {
                 egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Remote path")
             });

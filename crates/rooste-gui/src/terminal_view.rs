@@ -23,6 +23,9 @@ pub struct ViewOutput {
     pub resize: Option<(u16, u16)>,
 }
 
+/// Gap between the terminal text and the edges of its area.
+const PADDING: f32 = 6.0;
+
 /// Per-terminal widget state.
 #[derive(Debug)]
 pub struct TerminalView {
@@ -89,10 +92,12 @@ impl TerminalView {
         let cell = ui
             .ctx()
             .fonts_mut(|f| vec2(f.glyph_width(&font, 'M'), f.row_height(&font)));
-        let available = ui.available_size().max(cell);
+        let available = ui.available_size().max(cell + vec2(2.0, 2.0) * PADDING);
+        // The text keeps a small gap from the edges; the background fills them.
+        let grid = available - vec2(2.0, 2.0) * PADDING;
 
-        let cols = ((available.x / cell.x).floor() as u16).max(1);
-        let rows = ((available.y / cell.y).floor() as u16).max(1);
+        let cols = ((grid.x / cell.x).floor() as u16).max(1);
+        let rows = ((grid.y / cell.y).floor() as u16).max(1);
         if term.size() != (cols, rows) {
             let ppp = ui.ctx().pixels_per_point();
             term.resize(cols, rows, (cell.x * ppp) as u16, (cell.y * ppp) as u16);
@@ -126,7 +131,7 @@ impl TerminalView {
         });
         let metrics = Metrics {
             cell,
-            origin: rect.min,
+            origin: rect.min + vec2(PADDING, PADDING),
         };
 
         if response.has_focus() {

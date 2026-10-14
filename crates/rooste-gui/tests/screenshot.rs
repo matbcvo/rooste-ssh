@@ -165,3 +165,53 @@ fn render_app() {
     std::fs::create_dir_all(&out).unwrap();
     image.save(out.join("app.png")).unwrap();
 }
+
+/// The welcome screen and the main dialogs, one image each.
+#[test]
+#[ignore = "renders with wgpu; run manually to inspect the output"]
+fn render_dialogs() {
+    use std::sync::Arc;
+
+    use egui_kittest::kittest::Queryable;
+    use rooste_core::{Config, MemoryStore, Profile};
+    use rooste_gui::RoosteApp;
+
+    let p = |name: &str, folder: &str| Profile {
+        name: name.into(),
+        folder: folder.into(),
+        host: format!("{}.example.com", name.to_lowercase().replace(' ', "-")),
+        user: "deploy".into(),
+        ..Profile::default()
+    };
+    let config = Config {
+        profiles: vec![
+            p("Web 1", "Work/Production"),
+            p("Database", "Work/Production"),
+            p("Staging", "Work"),
+            p("Raspberry Pi", "Home"),
+        ],
+        ..Config::default()
+    };
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
+    std::fs::create_dir_all(&out).unwrap();
+    let shots: [(&str, &[&str]); 4] = [
+        ("welcome", &[]),
+        ("profile-editor", &["Session", "New session…"]),
+        ("settings", &["Session", "Settings…"]),
+        ("key-generator", &["Tools", "Key generator…"]),
+    ];
+    for (name, clicks) in shots {
+        let app = RoosteApp::with_config(config.clone(), None, Arc::new(MemoryStore::default()));
+        let mut harness = Harness::builder()
+            .with_size([1000.0, 640.0])
+            .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
+        rooste_gui::fonts::install(&harness.ctx);
+        harness.run();
+        for label in clicks {
+            harness.get_by_label(label).click();
+            harness.run();
+        }
+        let image = harness.render().expect("render with wgpu");
+        image.save(out.join(format!("{name}.png"))).unwrap();
+    }
+}
