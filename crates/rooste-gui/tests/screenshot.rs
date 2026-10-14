@@ -496,6 +496,12 @@ fn render_readme() {
     // A window connected to web-1, with `setup` run before rendering.
     let shot =
         |name: &str, theme: Theme, height: f32, setup: &dyn Fn(&mut Harness<'_, RoosteApp>)| {
+            // The three-pane overview needs more room than the other shots.
+            let width = if name == "split" || name == "light" {
+                1600.0
+            } else {
+                1280.0
+            };
             let dir = tempfile::tempdir().unwrap();
             let known_hosts = dir.path().join("known_hosts");
             rooste_protocols::ssh::known_hosts::learn(
@@ -517,11 +523,12 @@ fn render_readme() {
                 ..Config::default()
             };
             config.settings.theme = theme;
+            config.settings.download_dir = "/home/deploy/Downloads".into();
             let app = RoosteApp::with_config(config, None, Arc::new(MemoryStore::default()))
                 .with_known_hosts(known_hosts);
             app.secrets().set(&live.id, TEST_PASSWORD).unwrap();
             let mut harness = Harness::builder()
-                .with_size([1280.0, height])
+                .with_size([width, height])
                 .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
             rooste_gui::fonts::install(&harness.ctx);
             let ctx = harness.ctx.clone();
@@ -544,7 +551,24 @@ fn render_readme() {
     fn wait(harness: &mut Harness<'_, RoosteApp>, done: impl Fn(&RoosteApp) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(10);
         while !done(harness.state()) {
-            assert!(Instant::now() < deadline, "timed out");
+            assert!(
+                Instant::now() < deadline,
+                "timed out: {:?}",
+                harness
+                    .state()
+                    .tabs()
+                    .map(|t| (
+                        t.name.clone(),
+                        format!("{:?}", t.state),
+                        t.files.as_ref().map(|f| (
+                            f.entries.len(),
+                            f.handle.is_some(),
+                            f.cwd.clone(),
+                            f.error.clone()
+                        ))
+                    ))
+                    .collect::<Vec<_>>()
+            );
             harness.step();
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -557,7 +581,7 @@ fn render_readme() {
     let split = |harness: &mut Harness<'_, RoosteApp>| {
         harness
             .state_mut()
-            .split_active(egui_tiles::LinearDir::Horizontal);
+            .split_active(egui_tiles::LinearDir::Vertical);
         wait(harness, |app| {
             app.tabs()
                 .filter(|t| t.state == TabState::Connected)
@@ -567,15 +591,78 @@ fn render_readme() {
         for _ in 0..5 {
             harness.step();
         }
+        // web-1 (top) gets a bit more room than db-primary (bottom).
+        let app = harness.state_mut();
+        if let Some(root) = app.tree.root
+            && let Some(egui_tiles::Tile::Container(egui_tiles::Container::Linear(linear))) =
+                app.tree.tiles.get_mut(root)
+            && let [left, right] = linear.children[..]
+        {
+            linear.shares.set_share(left, 1.25);
+            linear.shares.set_share(right, 1.0);
+        }
+        // A third session as a background tab beside db-primary.
+        let ctx = harness.ctx.clone();
+        let live_id = live.id.clone();
+        harness.state_mut().connect_profile(&ctx, &live_id);
+        wait(harness, |app| {
+            app.tabs()
+                .filter(|t| t.state == TabState::Connected)
+                .count()
+                == 3
+        });
+        let mut tabs: Vec<_> = harness.state_mut().tabs_mut().collect();
+        tabs.sort_by_key(|t| t.id);
+        tabs[1].name = "db-primary".into();
+        tabs[2].name = "staging".into();
+        let ids = [tabs[0].id, tabs[1].id, tabs[2].id];
+        // Put staging next to db-primary, with web-1 and db-primary in front.
+        let app = harness.state_mut();
+        let tile_of = |app: &RoosteApp, id: u64| {
+            app.tree
+                .tiles
+                .iter()
+                .find_map(|(tile_id, tile)| {
+                    matches!(tile, egui_tiles::Tile::Pane(tab) if tab.id == id).then_some(*tile_id)
+                })
+                .unwrap()
+        };
+        let [web, db, staging] = ids.map(|id| tile_of(app, id));
+        let db_group = app.tree.tiles.parent_of(db).unwrap();
+        app.tree.move_tile_to_container(staging, db_group, 1, false);
+        for tile in [web, db] {
+            if let Some(group) = app.tree.tiles.parent_of(tile)
+                && let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
+                    app.tree.tiles.get_mut(group)
+            {
+                tabs.set_active(tile);
+            }
+        }
+        for _ in 0..3 {
+            harness.step();
+        }
+        let mut tabs: Vec<_> = harness.state_mut().tabs_mut().collect();
+        tabs.sort_by_key(|t| t.id);
+        tabs[0].toggle_files();
+        wait(harness, |app| {
+            app.tabs()
+                .filter_map(|t| t.files.as_ref())
+                .any(|f| f.entries.len() == 5)
+        });
+        for _ in 0..5 {
+            harness.step();
+        }
         let mut tabs: Vec<_> = harness.state_mut().tabs_mut().collect();
         tabs.sort_by_key(|t| t.id);
         fill(tabs[0], &web_output);
-        tabs[1].name = "db-primary".into();
+        if let Some(files) = tabs[0].files.as_mut() {
+            files.selected = vec![files.entries[2].path.clone()];
+        }
         fill(tabs[1], &db_output);
     };
 
-    shot("split", Theme::Dark, 720.0, &split);
-    shot("light", Theme::Light, 720.0, &split);
+    shot("split", Theme::Dark, 860.0, &split);
+    shot("light", Theme::Light, 860.0, &split);
     shot("files", Theme::Dark, 720.0, &|harness| {
         let tab = harness.state_mut().tabs_mut().next().unwrap();
         tab.toggle_files();
