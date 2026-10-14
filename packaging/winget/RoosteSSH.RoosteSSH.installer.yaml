@@ -1,11 +1,11 @@
-PackageIdentifier: matbcvo.rooste-ssh
+PackageIdentifier: RoosteSSH.RoosteSSH
 PackageVersion: "{{VERSION}}"
 InstallerType: wix
 Scope: machine
 UpgradeBehavior: install
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/matbcvo/rooste-ssh/releases/download/v{{VERSION}}/rooste-ssh-{{VERSION}}-x64.msi
+    InstallerUrl: https://github.com/rooste-ssh/rooste-ssh/releases/download/v{{VERSION}}/rooste-ssh-{{VERSION}}-x64.msi
     InstallerSha256: "{{MSI_SHA256}}"
 ManifestType: installer
 ManifestVersion: 1.6.0

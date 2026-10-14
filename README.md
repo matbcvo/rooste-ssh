@@ -36,7 +36,7 @@ session manager, an SFTP file panel, port forwarding, and built-in key tools and
 
 ## Installing
 
-Download a release from the [releases page](https://github.com/matbcvo/rooste-ssh/releases):
+Download a release from the [releases page](https://github.com/rooste-ssh/rooste-ssh/releases):
 
 | Platform | Download | Notes |
 |---|---|---|

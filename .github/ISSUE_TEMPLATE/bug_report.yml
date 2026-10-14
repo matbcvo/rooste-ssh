@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks for reporting! For security problems, please use
-        [private reporting](https://github.com/matbcvo/rooste-ssh/security/advisories/new) instead.
+        [private reporting](https://github.com/rooste-ssh/rooste-ssh/security/advisories/new) instead.
   - type: textarea
     id: what
     attributes:

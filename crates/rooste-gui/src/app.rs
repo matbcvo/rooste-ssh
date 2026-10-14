@@ -1250,7 +1250,7 @@ impl RoosteApp {
                     }
                     if ui.button("Project page").clicked() {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(
-                            "https://github.com/matbcvo/rooste-ssh",
+                            "https://github.com/rooste-ssh/rooste-ssh",
                         ));
                         ui.close();
                     }

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.matbcvo.rooste-ssh</id>
+  <id>ee.prica.rooste-ssh</id>
   <name>Rooste SSH</name>
   <summary>SSH, telnet and serial terminal with tabs, SFTP and port forwarding</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
-  <developer id="io.github.matbcvo">
+  <developer id="ee.prica">
     <name>Martin Vooremäe</name>
   </developer>
   <description>
@@ -16,9 +16,9 @@
       and serial connections are supported too.
     </p>
   </description>
-  <launchable type="desktop-id">io.github.matbcvo.rooste-ssh.desktop</launchable>
-  <url type="homepage">https://github.com/matbcvo/rooste-ssh</url>
-  <url type="bugtracker">https://github.com/matbcvo/rooste-ssh/issues</url>
+  <launchable type="desktop-id">ee.prica.rooste-ssh.desktop</launchable>
+  <url type="homepage">https://github.com/rooste-ssh/rooste-ssh</url>
+  <url type="bugtracker">https://github.com/rooste-ssh/rooste-ssh/issues</url>
   <content_rating type="oars-1.1"/>
   <provides>
     <binary>rooste</binary>

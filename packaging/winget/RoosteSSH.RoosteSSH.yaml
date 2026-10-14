@@ -1,5 +1,5 @@
 # winget version manifest; release.yml fills in the placeholders.
-PackageIdentifier: matbcvo.rooste-ssh
+PackageIdentifier: RoosteSSH.RoosteSSH
 PackageVersion: "{{VERSION}}"
 DefaultLocale: en-US
 ManifestType: version
