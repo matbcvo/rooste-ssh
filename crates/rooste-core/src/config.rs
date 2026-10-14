@@ -40,6 +40,8 @@ pub struct Settings {
     pub auto_reconnect: bool,
     /// Folder for SFTP downloads; empty means `~/Downloads`.
     pub download_dir: String,
+    /// The folder last chosen with "Download to…"; empty if none.
+    pub last_download_to: String,
     /// Offer the built-in agent's keys to rooste-ssh's own sessions.
     pub use_builtin_agent: bool,
     /// Ask GitHub for a newer release at startup.
@@ -57,6 +59,7 @@ impl Default for Settings {
             default_user: String::new(),
             auto_reconnect: true,
             download_dir: String::new(),
+            last_download_to: String::new(),
             use_builtin_agent: false,
             check_updates: true,
         }

@@ -368,6 +368,17 @@ impl RoosteApp {
         })
     }
 
+    /// All open tabs, mutably.
+    pub fn tabs_mut(&mut self) -> impl Iterator<Item = &mut SessionTab> {
+        self.tree
+            .tiles
+            .iter_mut()
+            .filter_map(|(_, tile)| match tile {
+                Tile::Pane(tab) => Some(tab),
+                Tile::Container(_) => None,
+            })
+    }
+
     fn tab_ids(&self) -> Vec<TileId> {
         self.tree
             .tiles
@@ -843,6 +854,16 @@ impl RoosteApp {
                         {
                             profile.allow_legacy = true;
                             self.save_config();
+                        }
+                    }
+                    TabAction::RememberDownloadFolder(dir) => {
+                        self.config.settings.last_download_to = dir.display().to_string();
+                        self.save_config();
+                        let settings = self.config.settings.clone();
+                        for (_, tile) in self.tree.tiles.iter_mut() {
+                            if let Tile::Pane(tab) = tile {
+                                tab.apply_settings(&settings);
+                            }
                         }
                     }
                     TabAction::SavePassword {

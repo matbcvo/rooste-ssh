@@ -16,6 +16,8 @@ pub enum PickId {
     ConvertOutput,
     AgentKeyFile,
     DownloadDir,
+    /// "Download to…" in the file panel.
+    DownloadTo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +80,11 @@ impl Picker {
         if clicked {
             self.open(ui.ctx(), id, kind, current);
         }
+        self.take(id)
+    }
+
+    /// The chosen path for `id`, once, after its dialog closes.
+    pub fn take(&mut self, id: PickId) -> Option<PathBuf> {
         match self.ready.take() {
             Some((ready, path)) if ready == id => Some(path),
             other => {
@@ -87,7 +94,17 @@ impl Picker {
         }
     }
 
-    fn open(&mut self, ctx: &egui::Context, id: PickId, kind: PickKind, current: &str) {
+    /// Whether a dialog is open.
+    pub fn is_busy(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Open a dialog without a button (e.g. from a menu); collect the answer
+    /// with [`Self::take`]. Ignored while another dialog is open.
+    pub fn open(&mut self, ctx: &egui::Context, id: PickId, kind: PickKind, current: &str) {
+        if self.is_busy() {
+            return;
+        }
         if let Some(path) = self.fake_answer.clone() {
             self.ready = Some((id, path));
             return;
@@ -132,11 +149,8 @@ fn start_dir(current: &str, id: PickId) -> Option<PathBuf> {
     dir.or_else(|| {
         let home = std::env::home_dir()?;
         let ssh = home.join(".ssh");
-        Some(if id != PickId::DownloadDir && ssh.is_dir() {
-            ssh
-        } else {
-            home
-        })
+        let key_file = !matches!(id, PickId::DownloadDir | PickId::DownloadTo);
+        Some(if key_file && ssh.is_dir() { ssh } else { home })
     })
 }
 
