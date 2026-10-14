@@ -103,6 +103,14 @@ cargo run -p rooste-cli -- user@host
 See [CONTRIBUTING.md](CONTRIBUTING.md) for running the tests and the repository layout, and
 [docs/ROADMAP.md](docs/ROADMAP.md) for the design and what is planned.
 
+## Privacy
+
+Rooste SSH collects no data and has no telemetry. It connects only to the servers you open
+sessions to, and, if "Check for updates at startup" is on (Settings), asks GitHub's API
+(`api.github.com`) once per start whether a newer release exists. That request sends nothing but
+the usual HTTP headers, including the app version in the user agent. Saved sessions, settings and
+session logs stay on your computer; saved passwords are kept in the system keyring.
+
 ## Security
 
 Please report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
