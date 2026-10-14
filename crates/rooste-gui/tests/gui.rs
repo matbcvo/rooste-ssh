@@ -683,6 +683,9 @@ fn saved_tunnels_start_with_the_session() {
     let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let listen = free.local_addr().unwrap().port();
     drop(free);
+    // A port another socket is listening on cannot be bound again.
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let taken_port = taken.local_addr().unwrap().port();
     let profile = Profile {
         tunnels: vec![
             rooste_core::Tunnel {
@@ -692,7 +695,7 @@ fn saved_tunnels_start_with_the_session() {
             },
             rooste_core::Tunnel {
                 kind: rooste_core::TunnelKind::Local,
-                listen: "1".into(),
+                listen: taken_port.to_string(),
                 target: "127.0.0.1:1".into(),
             },
         ],

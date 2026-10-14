@@ -56,20 +56,33 @@ struct Args {
     #[arg(long)]
     allow_legacy: bool,
 
-    /// Connect through these jump hosts: [user@]host[:port][,...]
-    #[arg(short = 'J', long = "jump", value_name = "HOSTS")]
+    #[arg(
+        short = 'J',
+        long = "jump",
+        value_name = "HOSTS",
+        help = "Connect through these jump hosts: [user@]host[:port][,...]"
+    )]
     jump: Option<String>,
 
-    /// Local forward [bind:]port:host:hostport; may be repeated
-    #[arg(short = 'L', value_name = "SPEC")]
+    #[arg(
+        short = 'L',
+        value_name = "SPEC",
+        help = "Local forward [bind:]port:host:hostport; may be repeated"
+    )]
     local: Vec<String>,
 
-    /// Remote forward [bind:]port:host:hostport; may be repeated
-    #[arg(short = 'R', value_name = "SPEC")]
+    #[arg(
+        short = 'R',
+        value_name = "SPEC",
+        help = "Remote forward [bind:]port:host:hostport; may be repeated"
+    )]
     remote: Vec<String>,
 
-    /// SOCKS proxy on [bind:]port; may be repeated
-    #[arg(short = 'D', value_name = "SPEC")]
+    #[arg(
+        short = 'D',
+        value_name = "SPEC",
+        help = "SOCKS proxy on [bind:]port; may be repeated"
+    )]
     dynamic: Vec<String>,
 
     /// Forward the SSH agent to the server

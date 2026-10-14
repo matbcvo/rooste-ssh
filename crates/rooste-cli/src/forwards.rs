@@ -3,7 +3,7 @@
 use anyhow::{Context, bail};
 use rooste_proto::ssh::{Forward, SshClient};
 
-/// `[bind:]port:host:hostport`.
+/// `[bind:]port:host:hostport`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PortSpec {
     pub bind: Option<String>,
@@ -12,7 +12,7 @@ pub struct PortSpec {
     pub host_port: u16,
 }
 
-/// `[bind:]port`.
+/// `[bind:]port`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SocksSpec {
     pub bind: Option<String>,
