@@ -163,11 +163,13 @@ jobs:
         shell: pwsh
         run: |
           $name = "rooste-ssh-${{ steps.version.outputs.version }}-windows-x64-portable"
+          # The build cache can bring back a folder from an earlier run.
+          Remove-Item -Recurse -Force "target\$name" -ErrorAction SilentlyContinue
           New-Item -ItemType Directory "target\$name" | Out-Null
           Copy-Item target\release\rooste.exe, target\release\rooste-cli.exe, LICENSE, target\notices\THIRD-PARTY-LICENSES.html "target\$name"
           # An empty `portable` file keeps settings next to the executable.
           New-Item -ItemType File "target\$name\portable" | Out-Null
-          Compress-Archive -Path "target\$name\*" -DestinationPath "target\packages\$name.zip"
+          Compress-Archive -Force -Path "target\$name\*" -DestinationPath "target\packages\$name.zip"
           Get-ChildItem target\packages
       - name: Smoke test the installed MSI
         shell: pwsh
