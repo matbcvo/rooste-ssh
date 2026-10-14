@@ -598,6 +598,32 @@ fn tab_text(app: &RoosteApp, index: usize) -> String {
 }
 
 #[test]
+fn tab_right_click_menu_duplicates_and_closes() {
+    let f = Fixture::with_server();
+    let mut harness = harness(app_with(&f, vec![f.profile("one")]));
+    context_menu(&mut harness, "one", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+
+    // The tab is the last widget labeled "one" (the session list comes first).
+    let tab_menu = |harness: &mut Harness<'_, RoosteApp>, item: &str| {
+        last(harness, "one").hover();
+        settle(harness);
+        last(harness, "one").click_secondary();
+        settle(harness);
+        last(harness, item).click();
+        settle(harness);
+    };
+    tab_menu(&mut harness, "Duplicate tab");
+    wait_for(&mut harness, "both connected", |app| {
+        connected_count(app) == 2
+    });
+
+    harness.state_mut().config.settings.confirm_close = false;
+    tab_menu(&mut harness, "Close tab");
+    wait_for(&mut harness, "one tab left", |app| app.tabs().count() == 1);
+}
+
+#[test]
 fn split_right_opens_a_second_session_beside_the_first() {
     let f = Fixture::with_server();
     let mut harness = harness(app_with(&f, vec![f.profile("one")]));

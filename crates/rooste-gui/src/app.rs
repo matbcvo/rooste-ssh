@@ -122,6 +122,18 @@ pub struct ImportSources {
 
 struct TabBehavior {
     close_requests: Vec<TileId>,
+    /// Picked from a tab's right-click menu.
+    menu_actions: Vec<(TileId, TabMenuAction)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TabMenuAction {
+    Duplicate,
+    SplitRight,
+    SplitDown,
+    Files,
+    Reconnect,
+    Close,
 }
 
 impl egui_tiles::Behavior<SessionTab> for TabBehavior {
@@ -165,6 +177,36 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
 
     fn tab_title_spacing(&self, _visuals: &egui::Visuals) -> f32 {
         12.0
+    }
+
+    fn on_tab_button(
+        &mut self,
+        tiles: &mut egui_tiles::Tiles<SessionTab>,
+        tile_id: TileId,
+        response: egui::Response,
+    ) -> egui::Response {
+        let Some(Tile::Pane(tab)) = tiles.get(tile_id) else {
+            return response;
+        };
+        let ended = tab.has_ended();
+        response.context_menu(|ui| {
+            let mut item = |ui: &mut Ui, label: &str, action: TabMenuAction| {
+                if ui.button(label).clicked() {
+                    self.menu_actions.push((tile_id, action));
+                    ui.close();
+                }
+            };
+            item(ui, "Duplicate tab", TabMenuAction::Duplicate);
+            item(ui, "Split right", TabMenuAction::SplitRight);
+            item(ui, "Split down", TabMenuAction::SplitDown);
+            item(ui, "Files (SFTP)", TabMenuAction::Files);
+            if ended {
+                item(ui, "Reconnect", TabMenuAction::Reconnect);
+            }
+            ui.separator();
+            item(ui, "Close tab", TabMenuAction::Close);
+        });
+        response
     }
 
     fn simplification_options(&self) -> SimplificationOptions {
@@ -447,10 +489,14 @@ impl RoosteApp {
     }
 
     fn add_tab(&mut self, tab: SessionTab) {
+        self.add_tab_beside(tab, self.active_tab_id());
+    }
+
+    /// Add a tab to the tab group of `beside` (or the root).
+    fn add_tab_beside(&mut self, tab: SessionTab, beside: Option<TileId>) {
         let id = self.tree.tiles.insert_pane(tab);
-        let target = self
-            .active_tab_id()
-            .and_then(|active| self.tree.tiles.parent_of(active))
+        let target = beside
+            .and_then(|tile| self.tree.tiles.parent_of(tile))
             .or(self.tree.root);
         match target.and_then(|t| self.tree.tiles.get_mut(t)) {
             Some(Tile::Container(Container::Tabs(tabs))) => {
@@ -554,22 +600,34 @@ impl RoosteApp {
 
     /// A new tab connecting like the active one.
     pub fn duplicate_active(&mut self) {
+        if let Some(id) = self.active_tab_id() {
+            self.duplicate_tab(id);
+        }
+    }
+
+    /// A new tab connecting like `id`, in the same tab group.
+    fn duplicate_tab(&mut self, id: TileId) {
         let settings = self.config.settings.clone();
         if let Some(tab) = self
-            .active_tab_id()
-            .and_then(|id| self.tree.tiles.get_pane(&id))
+            .tree
+            .tiles
+            .get_pane(&id)
             .map(|tab| tab.duplicate(&settings))
         {
-            self.add_tab(tab);
+            self.add_tab_beside(tab, Some(id));
         }
     }
 
     /// Open a copy of the active tab beside it.
     pub fn split_active(&mut self, dir: LinearDir) {
+        if let Some(id) = self.active_tab_id() {
+            self.split_tab(id, dir);
+        }
+    }
+
+    /// Open a copy of tab `active` beside its tab group.
+    fn split_tab(&mut self, active: TileId, dir: LinearDir) {
         let settings = self.config.settings.clone();
-        let Some(active) = self.active_tab_id() else {
-            return;
-        };
         let Some(tab) = self
             .tree
             .tiles
@@ -596,6 +654,25 @@ impl RoosteApp {
                 }
             }
             None => self.tree.root = Some(split),
+        }
+    }
+
+    fn tab_menu_action(&mut self, id: TileId, action: TabMenuAction) {
+        match action {
+            TabMenuAction::Duplicate => self.duplicate_tab(id),
+            TabMenuAction::SplitRight => self.split_tab(id, LinearDir::Horizontal),
+            TabMenuAction::SplitDown => self.split_tab(id, LinearDir::Vertical),
+            TabMenuAction::Files => {
+                if let Some(tab) = self.tab_mut(id) {
+                    tab.toggle_files();
+                }
+            }
+            TabMenuAction::Reconnect => {
+                if let Some(tab) = self.tab_mut(id) {
+                    tab.reconnect();
+                }
+            }
+            TabMenuAction::Close => self.request_close(id),
         }
     }
 
@@ -804,6 +881,7 @@ impl RoosteApp {
                 } else {
                     let mut behavior = TabBehavior {
                         close_requests: Vec::new(),
+                        menu_actions: Vec::new(),
                     };
                     let broadcast = self.broadcast;
                     for (_, tile) in self.tree.tiles.iter_mut() {
@@ -815,6 +893,9 @@ impl RoosteApp {
                     self.deliver_broadcast();
                     for id in behavior.close_requests {
                         self.request_close(id);
+                    }
+                    for (id, action) in behavior.menu_actions {
+                        self.tab_menu_action(id, action);
                     }
                 }
             });

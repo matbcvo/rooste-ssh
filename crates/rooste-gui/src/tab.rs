@@ -175,6 +175,12 @@ impl SessionTab {
     }
 
     /// Show or hide the SFTP file panel.
+    /// Connect again after a failure, with a fresh reconnect budget.
+    pub fn reconnect(&mut self) {
+        self.reconnects = 0;
+        self.restart();
+    }
+
     pub fn toggle_files(&mut self) {
         if self.files.take().is_none() {
             self.files = Some(FilesPanel::new(self.download_dir.clone()));
@@ -413,8 +419,7 @@ impl SessionTab {
                         }
                         TabState::Closed(_) | TabState::Failed(_) => {
                             if ui.button("Reconnect").clicked() {
-                                self.reconnects = 0;
-                                self.restart();
+                                self.reconnect();
                             }
                             if self.failure.as_ref().is_some_and(|f| f.legacy_hint)
                                 && ui
