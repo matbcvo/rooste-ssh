@@ -77,7 +77,10 @@ fn ssh_layer_loads_ppk_and_asks_for_passphrases() {
 #[test]
 #[ignore = "manual check with PuTTYgen"]
 fn export_for_puttygen() {
-    let dir = std::path::PathBuf::from(std::env::var("ROOSTE_PPK_EXPORT_DIR").unwrap());
+    let Some(dir) = std::env::var_os("ROOSTE_PPK_EXPORT_DIR").map(std::path::PathBuf::from) else {
+        eprintln!("set ROOSTE_PPK_EXPORT_DIR to export keys for PuTTYgen");
+        return;
+    };
     for (name, kind) in [
         ("ed25519", rooste_keys::KeyType::Ed25519),
         ("ecdsa", rooste_keys::KeyType::EcdsaP256),

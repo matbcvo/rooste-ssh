@@ -894,14 +894,17 @@ fn file_panel_browse_transfer_and_manage() {
     click(&mut harness, "New folder");
     type_into(&mut harness, "Folder name", "made-here");
     click(&mut harness, "Create");
-    wait_for(&mut harness, "mkdir", |_| root.join("made-here").is_dir());
+    wait_for(&mut harness, "mkdir", |app| {
+        root.join("made-here").is_dir() && files_entries(app).contains(&"made-here".to_owned())
+    });
 
     click(&mut harness, "📄 upload.txt  (9 B)");
     click(&mut harness, "Rename");
     type_into(&mut harness, "New name", "-2");
     click(&mut harness, "Rename");
-    wait_for(&mut harness, "rename", |_| {
+    wait_for(&mut harness, "rename", |app| {
         root.join("upload.txt-2").exists()
+            && files_entries(app).contains(&"upload.txt-2".to_owned())
     });
 
     click(&mut harness, "📄 upload.txt-2  (9 B)");
