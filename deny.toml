@@ -4,6 +4,9 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+# Unmaintained notices only fail for our direct dependencies; transitive ones
+# (e.g. deep inside egui) are out of our control. Vulnerabilities always fail.
+unmaintained = "workspace"
 ignore = [
     # Marvin attack: timing side channel in RSA private-key operations, no fixed
     # `rsa` release exists. rooste-ssh only uses RSA private keys to sign a login
