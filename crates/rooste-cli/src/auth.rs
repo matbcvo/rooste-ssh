@@ -1,10 +1,14 @@
-//! Trying authentication methods in OpenSSH order: agent, key files, password.
+//! Trying authentication methods in OpenSSH order: agent, key files,
+//! keyboard-interactive, password.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::bail;
-use rooste_protocols::ssh::{AgentSource, Auth, PrivateKey, SshClient, SshError, load_private_key};
+use rooste_protocols::ssh::{
+    AgentSource, Auth, AuthMethod, InteractiveStep, PrivateKey, SshClient, SshError,
+    load_private_key,
+};
 
 const PROMPT_ATTEMPTS: usize = 3;
 const DEFAULT_KEYS: [&str; 3] = ["id_ed25519", "id_ecdsa", "id_rsa"];
@@ -52,6 +56,18 @@ pub async fn authenticate(
         }
     }
 
+    let Some(offered) = client.auth_methods(user).await? else {
+        return Ok(());
+    };
+    if offered.contains(&AuthMethod::KeyboardInteractive)
+        && keyboard_interactive(client, user).await?
+    {
+        return Ok(());
+    }
+    if !offered.contains(&AuthMethod::Password) {
+        bail!("permission denied for {user}@{host}");
+    }
+
     for _ in 0..PROMPT_ATTEMPTS {
         let Some(password) = prompt_secret(format!("{user}@{host}'s password: ")).await? else {
             break;
@@ -62,6 +78,47 @@ pub async fn authenticate(
         eprintln!("Permission denied, please try again.");
     }
     bail!("permission denied for {user}@{host}")
+}
+
+/// Answer the server's questions on the terminal (a password, a one-time
+/// code, ...). Hidden questions are read without echo.
+async fn keyboard_interactive(client: &mut SshClient, user: &str) -> anyhow::Result<bool> {
+    for _ in 0..PROMPT_ATTEMPTS {
+        let mut step = client.keyboard_interactive_start(user).await?;
+        // Servers may ask several rounds of questions; don't loop forever.
+        for _ in 0..10 {
+            let InteractiveStep::Prompts {
+                name,
+                instructions,
+                prompts,
+            } = &step
+            else {
+                break;
+            };
+            for line in [name, instructions] {
+                if !line.trim().is_empty() {
+                    eprintln!("{}", line.trim());
+                }
+            }
+            let mut answers = Vec::with_capacity(prompts.len());
+            for question in prompts {
+                let answer = if question.echo {
+                    prompt_line(question.prompt.clone()).await?
+                } else {
+                    prompt_secret(question.prompt.clone())
+                        .await?
+                        .unwrap_or_default()
+                };
+                answers.push(answer);
+            }
+            step = client.keyboard_interactive_respond(answers).await?;
+        }
+        if step == InteractiveStep::Success {
+            return Ok(true);
+        }
+        eprintln!("Permission denied, please try again.");
+    }
+    Ok(false)
 }
 
 fn default_keys() -> Vec<PathBuf> {
@@ -97,6 +154,20 @@ async fn load_key(path: &Path) -> anyhow::Result<Option<Arc<PrivateKey>>> {
         }
     }
     Ok(None)
+}
+
+/// Read a line, shown as typed.
+async fn prompt_line(prompt: String) -> anyhow::Result<String> {
+    use std::io::Write;
+    let line = tokio::task::spawn_blocking(move || {
+        eprint!("{prompt}");
+        std::io::stderr().flush()?;
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        Ok::<_, std::io::Error>(line.trim_end_matches(['\r', '\n']).to_owned())
+    })
+    .await??;
+    Ok(line)
 }
 
 /// Read a secret without echo. `None` if the user entered nothing.

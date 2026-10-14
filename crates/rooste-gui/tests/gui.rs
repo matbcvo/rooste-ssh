@@ -9,9 +9,10 @@ use egui_kittest::kittest::Queryable;
 use rooste_core::{Config, MemoryStore, Profile, Theme};
 use rooste_gui::RoosteApp;
 use rooste_gui::app::{Dialog, TabState};
+use rooste_gui::session::PromptKind;
 use rooste_gui::tab::SessionTab;
 use rooste_protocols::ssh::known_hosts;
-use rooste_testkit::{TEST_PASSWORD, TEST_USER, TestServer};
+use rooste_testkit::{TEST_CODE, TEST_PASSWORD, TEST_USER, TestServer};
 use tempfile::TempDir;
 
 struct Fixture {
@@ -31,17 +32,29 @@ impl Fixture {
 
     /// Also start an SSH server whose host key is already trusted.
     fn with_server() -> Self {
-        let mut f = Self::new();
+        let f = Self::new();
         let server = f.net.block_on(TestServer::start());
+        f.trusting(server)
+    }
+
+    /// A server that asks for the password and a one-time code.
+    fn with_keyboard_interactive_server() -> Self {
+        let f = Self::new();
+        let server = f.net.block_on(TestServer::start_keyboard_interactive());
+        f.trusting(server)
+    }
+
+    /// Use `server`, with its host key already trusted.
+    fn trusting(mut self, server: TestServer) -> Self {
         known_hosts::learn(
-            &f.known_hosts(),
+            &self.known_hosts(),
             "127.0.0.1",
             server.addr.port(),
             &server.host_key,
         )
         .unwrap();
-        f.server = Some(server);
-        f
+        self.server = Some(server);
+        self
     }
 
     fn start_untrusted_server(&self) -> TestServer {
@@ -447,6 +460,66 @@ fn settings_are_saved_and_applied() {
 }
 
 // ---- Connecting saved profiles ------------------------------------------
+
+#[test]
+fn keyboard_interactive_login_asks_each_question() {
+    let f = Fixture::with_keyboard_interactive_server();
+    let profile = Profile {
+        save_password: true,
+        ..f.profile("two factor")
+    };
+    let id = profile.id.clone();
+    let config = Config {
+        profiles: vec![profile],
+        ..Config::default()
+    };
+    let mut harness = harness(f.app(config));
+    context_menu(&mut harness, "two factor", "Connect");
+
+    // First the password (hidden), then the code, each in the prompt dialog.
+    wait_for(&mut harness, "password question", |app| {
+        first_tab(app).is_some_and(|t| t.prompt.is_some())
+    });
+    harness.get_by_label(&format!("Log in to {TEST_USER}@127.0.0.1"));
+    type_into(&mut harness, "Password", TEST_PASSWORD);
+    harness.get_by_label("Log in").click();
+    wait_for(&mut harness, "code question", |app| {
+        first_tab(app).is_some_and(|t| {
+            t.prompt.as_ref().is_some_and(|p| {
+                matches!(&p.kind, PromptKind::Interactive { prompt, .. } if prompt.starts_with("Verification code"))
+            })
+        })
+    });
+    harness.get_by_label("Two-factor login");
+    harness.get_by_label("Enter the code from your app.");
+    type_into(&mut harness, "Verification code", TEST_CODE);
+    harness.get_by_label("Log in").click();
+    wait_for(&mut harness, "connected", |app| {
+        first_tab(app).is_some_and(|t| t.state == TabState::Connected)
+    });
+    assert_eq!(
+        harness.state().secrets().get(&id).as_deref(),
+        Some(TEST_PASSWORD),
+        "the password (not the code) is saved"
+    );
+
+    // Next time the saved password answers the password question; only the
+    // code is asked.
+    let ctx = harness.ctx.clone();
+    harness.state_mut().connect_profile(&ctx, &id);
+    wait_for(&mut harness, "code question only", |app| {
+        app.tabs().any(|t| {
+            t.prompt.as_ref().is_some_and(|p| {
+                matches!(&p.kind, PromptKind::Interactive { prompt, .. } if prompt.starts_with("Verification code"))
+            })
+        })
+    });
+    type_into(&mut harness, "Verification code", TEST_CODE);
+    harness.get_by_label("Log in").click();
+    wait_for(&mut harness, "both connected", |app| {
+        connected_count(app) == 2
+    });
+}
 
 #[test]
 fn password_prompt_and_saving_the_password() {

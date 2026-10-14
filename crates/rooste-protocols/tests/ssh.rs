@@ -8,12 +8,12 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use rooste_protocols::Transport;
 use rooste_protocols::ssh::{
-    AgentSource, Auth, HostKeyPolicy, HostKeyPrompt, PtyRequest, SshClient, SshConfig, SshError,
-    UnknownHostKey, connect, known_hosts, load_private_key,
+    AgentSource, Auth, AuthMethod, HostKeyPolicy, HostKeyPrompt, InteractiveStep, PtyRequest,
+    SshClient, SshConfig, SshError, UnknownHostKey, connect, known_hosts, load_private_key,
 };
 use rooste_testkit::{
-    TEST_KEY_PASSPHRASE, TEST_PASSWORD, TEST_USER, TestAgent, TestServer, key_path, private_key,
-    public_key,
+    TEST_CODE, TEST_KEY_PASSPHRASE, TEST_PASSWORD, TEST_USER, TestAgent, TestServer, key_path,
+    private_key, public_key,
 };
 use russh::{Preferred, kex};
 use tempfile::TempDir;
@@ -325,4 +325,74 @@ fn files_that_are_not_private_keys_get_a_clear_error() {
     std::fs::write(&notes, "just some text\n").unwrap();
     let error = load_private_key(&notes, None).unwrap_err();
     assert!(matches!(error, SshError::NotAKey(_)), "{error}");
+}
+
+#[tokio::test]
+async fn keyboard_interactive_login_with_two_prompts() {
+    let server = TestServer::start_keyboard_interactive().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = connected(&server, &dir).await;
+
+    // Password logins are refused; the server offers keyboard-interactive.
+    assert!(
+        !client
+            .authenticate(TEST_USER, &Auth::password(TEST_PASSWORD))
+            .await
+            .unwrap()
+    );
+    let methods = client.auth_methods(TEST_USER).await.unwrap().unwrap();
+    assert!(
+        methods.contains(&AuthMethod::KeyboardInteractive),
+        "{methods:?}"
+    );
+    assert!(!methods.contains(&AuthMethod::Password), "{methods:?}");
+
+    let InteractiveStep::Prompts { prompts, .. } =
+        client.keyboard_interactive_start(TEST_USER).await.unwrap()
+    else {
+        panic!("expected a password prompt");
+    };
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0].prompt.starts_with("Password") && !prompts[0].echo);
+
+    let InteractiveStep::Prompts {
+        name,
+        instructions,
+        prompts,
+    } = client
+        .keyboard_interactive_respond(vec![TEST_PASSWORD.into()])
+        .await
+        .unwrap()
+    else {
+        panic!("expected a code prompt");
+    };
+    assert_eq!(name, "Two-factor login");
+    assert!(!instructions.is_empty());
+    assert!(prompts[0].prompt.starts_with("Verification code") && prompts[0].echo);
+
+    assert_eq!(
+        client
+            .keyboard_interactive_respond(vec![TEST_CODE.into()])
+            .await
+            .unwrap(),
+        InteractiveStep::Success
+    );
+}
+
+#[tokio::test]
+async fn keyboard_interactive_wrong_answer_fails() {
+    let server = TestServer::start_keyboard_interactive().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = connected(&server, &dir).await;
+    assert!(matches!(
+        client.keyboard_interactive_start(TEST_USER).await.unwrap(),
+        InteractiveStep::Prompts { .. }
+    ));
+    assert_eq!(
+        client
+            .keyboard_interactive_respond(vec!["wrong".into()])
+            .await
+            .unwrap(),
+        InteractiveStep::Failure
+    );
 }

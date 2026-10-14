@@ -228,6 +228,5 @@ Windows-only code (named-pipe agent, registry import) gets Windows-only tests.
 ## Risks
 
 - Terminal correctness and Windows keyboard input — budget extra time for M2.
-- russh gaps: GSSAPI/Kerberos needs an external implementation of russh's `GssapiAuthenticator`;
-  keyboard-interactive login is not wired up yet (password auth covers most servers).
+- russh gaps: GSSAPI/Kerberos needs an external implementation of russh's `GssapiAuthenticator`.
 - Font rendering (fallback, CJK, emoji) in egui.

@@ -32,6 +32,9 @@ pub use telnet::TelnetServer;
 /// Credentials accepted by [`TestServer`] and the Docker fixture. Test-only.
 pub const TEST_USER: &str = "rooste";
 pub const TEST_PASSWORD: &str = "rooste";
+/// The one-time code asked for after the password by
+/// [`TestServer::start_keyboard_interactive`].
+pub const TEST_CODE: &str = "424242";
 /// Passphrase of the `id_ed25519_encrypted` test key.
 pub const TEST_KEY_PASSPHRASE: &str = "rooste";
 
