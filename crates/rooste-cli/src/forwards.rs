@@ -1,7 +1,7 @@
 //! OpenSSH-style forward specs: `-L`, `-R` and `-D`.
 
 use anyhow::{Context, bail};
-use rooste_proto::ssh::{Forward, SshClient};
+use rooste_protocols::ssh::{Forward, SshClient};
 
 /// `[bind:]port:host:hostport`
 #[derive(Debug, Clone, PartialEq, Eq)]

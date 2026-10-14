@@ -53,19 +53,19 @@ protocol to other programs is planned for later.)
 
 ```
 crates/
-├─ rooste-core/     session/profile model, config, ssh_config and session import
-├─ rooste-proto/    Transport trait: SSH (russh), later serial, telnet, raw
-├─ rooste-term/     alacritty_terminal wrapper: input encoding, selection, scrollback
-├─ rooste-keys/     keygen, .ppk import/export, agent client/server
-├─ rooste-sftp/     SFTP operations, transfer queue
-├─ rooste-gui/      egui app (binary `rooste`): tabs, splits, session manager, settings
-├─ rooste-cli/      headless client
-└─ rooste-testkit/  shared test fixtures
+├─ rooste-core/       session/profile model, config, ssh_config and session import
+├─ rooste-protocols/  Transport trait: SSH (russh), later serial, telnet, raw
+├─ rooste-terminal/   alacritty_terminal wrapper: input encoding, selection, scrollback
+├─ rooste-keys/       key generation, .ppk import/export, agent client/server
+├─ rooste-sftp/       SFTP operations, transfer queue
+├─ rooste-gui/        egui app (binary `rooste`): tabs, splits, session manager, settings
+├─ rooste-cli/        headless client
+└─ rooste-testkit/    shared test fixtures
 ```
 
 - The GUI talks to sessions through message channels, so a slow network never freezes the UI.
 - The terminal widget, tabs, logging and broadcast only use `Transport`
-  ([crates/rooste-proto/src/lib.rs](../crates/rooste-proto/src/lib.rs)).
+  ([crates/rooste-protocols/src/lib.rs](../crates/rooste-protocols/src/lib.rs)).
 - Every session profile carries a `protocol` field (`ssh`, `serial`, `telnet`, `raw`).
 
 ## Milestones
@@ -96,7 +96,7 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
   `^C`; Ctrl+Shift+C/V, right or middle click to paste; bracketed paste.
 - **Tests required:** `insta` snapshot tests of the grid; regression suite from `vttest`/`esctest`
   cases; manual check with full-screen programs. Done: conformance suite in
-  `crates/rooste-term/tests`, kittest GUI tests, and an opt-in screenshot test
+  `crates/rooste-terminal/tests`, kittest GUI tests, and an opt-in screenshot test
   (`cargo test -p rooste-gui --test screenshot -- --ignored`).
 
 ### M3 — First usable app (MVP) ✅
@@ -218,7 +218,7 @@ Windows-only code (named-pipe agent, registry import) gets Windows-only tests.
 - Known issue: the `rsa` crate is affected by the Marvin timing attack (RUSTSEC-2023-0071) with no
   fix released yet. Exposure is low for a client (local signing, once per login), so it is an
   explicit exception in `deny.toml`; prefer Ed25519 keys. Revisit when a fixed `rsa` ships.
-- The policy lives in [crates/rooste-proto/src/ssh/algorithms.rs](../crates/rooste-proto/src/ssh/algorithms.rs).
+- The policy lives in [crates/rooste-protocols/src/ssh/algorithms.rs](../crates/rooste-protocols/src/ssh/algorithms.rs).
   russh's own default also offers `ssh-rsa` (SHA-1) host keys; rooste-ssh moves it to the legacy
   tier. Never-supported algorithms are excluded at build time (the russh `dsa` and `des` features
   are off).

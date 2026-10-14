@@ -3,12 +3,14 @@
 //!
 //! ```text
 //! ROOSTE_INTEROP_SERVERS="openssh-9.3=127.0.0.1:2301,dropbear=127.0.0.1:2303" \
-//! ROOSTE_LEGACY_ADDR=127.0.0.1:2304 cargo test -p rooste-proto --test interop -- --ignored
+//! ROOSTE_LEGACY_ADDR=127.0.0.1:2304 cargo test -p rooste-protocols --test interop -- --ignored
 //! ```
 
 use std::sync::Arc;
 
-use rooste_proto::ssh::{Auth, HostKeyPolicy, PtyRequest, SshClient, SshConfig, SshError, connect};
+use rooste_protocols::ssh::{
+    Auth, HostKeyPolicy, PtyRequest, SshClient, SshConfig, SshError, connect,
+};
 use rooste_testkit::{TEST_PASSWORD, TEST_USER, private_key};
 use tempfile::TempDir;
 

@@ -3,12 +3,12 @@
 //! On Unix, stdin bytes are passed through unchanged: the local terminal
 //! already encodes keys and tracks modes set by the remote application.
 //! The Windows console delivers key events instead, which are encoded with
-//! `rooste_term::input`.
+//! `rooste_terminal::input`.
 
 use std::io;
 
-use rooste_proto::Transport;
-use rooste_proto::ssh::SshShell;
+use rooste_protocols::Transport;
+use rooste_protocols::ssh::SshShell;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
@@ -129,7 +129,7 @@ fn spawn_input(tx: mpsc::Sender<Input>) {
 #[cfg(windows)]
 mod windows_keys {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-    use rooste_term::input::{InputMode, Key, Modifiers, encode as encode_key};
+    use rooste_terminal::input::{InputMode, Key, Modifiers, encode as encode_key};
 
     pub fn encode(event: KeyEvent) -> Option<Vec<u8>> {
         if event.kind == KeyEventKind::Release {

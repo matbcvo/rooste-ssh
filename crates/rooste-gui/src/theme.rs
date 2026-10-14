@@ -1,7 +1,7 @@
 //! Applying settings to the UI and terminals.
 
 use rooste_core::{Settings, Theme};
-use rooste_term::Palette;
+use rooste_terminal::Palette;
 
 use crate::terminal_view::TerminalView;
 

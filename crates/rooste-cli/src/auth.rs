@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::bail;
-use rooste_proto::ssh::{AgentSource, Auth, PrivateKey, SshClient, SshError, load_private_key};
+use rooste_protocols::ssh::{AgentSource, Auth, PrivateKey, SshClient, SshError, load_private_key};
 
 const PROMPT_ATTEMPTS: usize = 3;
 const DEFAULT_KEYS: [&str; 3] = ["id_ed25519", "id_ecdsa", "id_rsa"];

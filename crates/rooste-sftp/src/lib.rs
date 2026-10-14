@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::time::SystemTime;
 
-use rooste_proto::ssh::{SshClient, SshError};
+use rooste_protocols::ssh::{SshClient, SshError};
 use russh_sftp::client::SftpSession;
 use russh_sftp::client::error::Error as ProtocolError;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

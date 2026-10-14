@@ -1420,7 +1420,7 @@ dependencies = [
  "libfuzzer-sys",
  "rooste-core",
  "rooste-keys",
- "rooste-term",
+ "rooste-terminal",
 ]
 
 [[package]]
@@ -1443,7 +1443,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rooste-term"
+name = "rooste-terminal"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",

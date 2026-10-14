@@ -1,5 +1,5 @@
 [package]
-name = "rooste-proto"
+name = "rooste-protocols"
 description = "Transport abstraction implemented by SSH, serial, telnet and raw connections"
 version.workspace = true
 edition.workspace = true

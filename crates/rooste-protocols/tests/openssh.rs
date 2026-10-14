@@ -6,7 +6,7 @@ mod common;
 
 use std::sync::Arc;
 
-use rooste_proto::ssh::{
+use rooste_protocols::ssh::{
     AgentSource, Auth, HostKeyPolicy, SshClient, SshConfig, SshError, connect, known_hosts,
     load_private_key,
 };
@@ -130,8 +130,8 @@ async fn changed_host_key_is_refused() {
 #[ignore = "requires an OpenSSH server"]
 async fn pty_shell_resize_and_exit_status() {
     use common::{read_to_end, read_until};
-    use rooste_proto::Transport;
-    use rooste_proto::ssh::PtyRequest;
+    use rooste_protocols::Transport;
+    use rooste_protocols::ssh::PtyRequest;
 
     let client = login(&Auth::PublicKey(Arc::new(private_key("id_ed25519")))).await;
     let pty = PtyRequest {
@@ -163,7 +163,7 @@ async fn jump_host_to_itself() {
     let mut target = SshConfig::new("127.0.0.1", 22);
     target.known_hosts = dir.path().join("known_hosts");
     target.host_key_policy = HostKeyPolicy::AcceptNew;
-    let mut client = rooste_proto::ssh::connect_via(jump, &target)
+    let mut client = rooste_protocols::ssh::connect_via(jump, &target)
         .await
         .expect("via jump");
     assert!(

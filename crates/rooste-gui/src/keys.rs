@@ -11,7 +11,7 @@
 //! when text is selected).
 
 use egui::{Event, Key, Modifiers};
-use rooste_term::input::{self, InputMode, Key as TermKey, Modifiers as TermMods};
+use rooste_terminal::input::{self, InputMode, Key as TermKey, Modifiers as TermMods};
 
 /// What a single egui event means for the terminal.
 #[derive(Debug, Clone, PartialEq, Eq)]

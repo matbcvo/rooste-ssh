@@ -14,7 +14,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 rooste-core = { path = "../crates/rooste-core" }
 rooste-keys = { path = "../crates/rooste-keys" }
-rooste-term = { path = "../crates/rooste-term" }
+rooste-terminal = { path = "../crates/rooste-terminal" }
 
 [[bin]]
 name = "terminal"

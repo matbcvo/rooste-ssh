@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use egui::{Id, Modal, RichText, Ui};
-use rooste_keys::{Agent, KeyType, PublicKey, keygen, ppk};
+use rooste_keys::{Agent, KeyType, PublicKey, ppk};
 
 use crate::dialogs::Decision;
 use crate::picker::{PickId, PickKind, Picker, path_row};
@@ -71,10 +71,10 @@ impl KeyGenerator {
             return;
         }
         let path = rooste_core::expand_tilde(self.path.trim());
-        let result = keygen::generate(self.kind, &self.comment).and_then(|key| {
+        let result = rooste_keys::generate(self.kind, &self.comment).and_then(|key| {
             let passphrase = (!self.passphrase.is_empty()).then_some(self.passphrase.as_str());
-            keygen::save_openssh(&key, &path, passphrase)?;
-            Ok(keygen::public_line(key.public_key()))
+            rooste_keys::save_openssh(&key, &path, passphrase)?;
+            Ok(rooste_keys::public_line(key.public_key()))
         });
         match result {
             Ok(line) => self.result = Some((line, path.display().to_string())),
@@ -109,7 +109,7 @@ impl KeyGenerator {
                     });
                     return;
                 }
-                egui::Grid::new("keygen")
+                egui::Grid::new("generation")
                     .num_columns(2)
                     .spacing(crate::theme::FORM_SPACING)
                     .show(ui, |ui| {
@@ -188,11 +188,12 @@ impl KeyConverter {
             let new_passphrase =
                 (!self.new_passphrase.is_empty()).then_some(self.new_passphrase.as_str());
             if text.trim_start().starts_with("PuTTY-User-Key-File-") {
-                keygen::save_openssh(&key, &output, new_passphrase).map_err(|e| e.to_string())?;
+                rooste_keys::save_openssh(&key, &output, new_passphrase)
+                    .map_err(|e| e.to_string())?;
                 Ok(format!("Saved an OpenSSH key to {}.", output.display()))
             } else {
                 let converted = ppk::export(&key, new_passphrase).map_err(|e| e.to_string())?;
-                keygen::write_private(&output, converted.as_bytes())
+                rooste_keys::write_private(&output, converted.as_bytes())
                     .map_err(|e| format!("{}: {e}", output.display()))?;
                 Ok(format!("Saved a PuTTY key to {}.", output.display()))
             }

@@ -6,7 +6,7 @@ use egui::{Id, Modal, Ui};
 use rooste_core::{
     FlowControl, Parity, Profile, Protocol, SerialSettings, Settings, Theme, Tunnel, TunnelKind,
 };
-use rooste_proto::ssh::UnknownHostKey;
+use rooste_protocols::ssh::UnknownHostKey;
 
 use crate::picker::{PickId, PickKind, Picker, path_row};
 use crate::session::PromptKind;

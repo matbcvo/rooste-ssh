@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 use egui::{RichText, Ui};
 use rooste_core::Settings;
-use rooste_proto::ssh::UnknownHostKey;
-use rooste_term::{Palette, TermEvent, Terminal};
+use rooste_protocols::ssh::UnknownHostKey;
+use rooste_terminal::{Palette, TermEvent, Terminal};
 use tokio::sync::oneshot;
 
 use crate::files::FilesPanel;

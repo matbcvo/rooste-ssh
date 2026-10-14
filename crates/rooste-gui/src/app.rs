@@ -7,7 +7,7 @@ use egui::{RichText, Ui};
 use egui_tiles::{Container, LinearDir, SimplificationOptions, Tile, TileId, Tree, UiResponse};
 use rooste_core::import::{putty, ssh_config};
 use rooste_core::{Config, ConfigLocation, Profile, Protocol, SecretStore, Settings, Theme};
-use rooste_proto::ssh::AgentSource;
+use rooste_protocols::ssh::AgentSource;
 
 use crate::dialogs::{self, Decision, ProfileEditor, SettingsEditor};
 use crate::manager::{self, ManagerAction, ManagerState};
@@ -786,7 +786,7 @@ impl RoosteApp {
                     user: self.config.settings.default_user.clone(),
                     ..Profile::default()
                 };
-                self.serial_ports = rooste_proto::serial::available_ports();
+                self.serial_ports = rooste_protocols::serial::available_ports();
                 self.dialog = Some(Dialog::EditProfile(Box::new(ProfileEditor::new(
                     profile, true,
                 ))));
@@ -794,7 +794,7 @@ impl RoosteApp {
             ManagerAction::Connect(id) => self.connect_profile(ctx, &id),
             ManagerAction::Edit(id) => {
                 if let Some(profile) = self.config.profile(&id) {
-                    self.serial_ports = rooste_proto::serial::available_ports();
+                    self.serial_ports = rooste_protocols::serial::available_ports();
                     self.dialog = Some(Dialog::EditProfile(Box::new(ProfileEditor::new(
                         profile.clone(),
                         false,

@@ -38,7 +38,7 @@ jobs:
           for image in interop-openssh-old interop-openssh interop-openssh-edge; do
             docker run --rm --entrypoint ssh $image -V
           done
-      - run: cargo test -p rooste-proto --test interop -- --ignored --nocapture
+      - run: cargo test -p rooste-protocols --test interop -- --ignored --nocapture
         env:
           ROOSTE_INTEROP_SERVERS: openssh-old=127.0.0.1:2301,openssh=127.0.0.1:2302,openssh-edge=127.0.0.1:2303,dropbear=127.0.0.1:2304
           ROOSTE_LEGACY_ADDR: 127.0.0.1:2305
@@ -95,4 +95,4 @@ jobs:
           path: target/criterion
           key: criterion-${{ github.run_id }}
           restore-keys: criterion-
-      - run: cargo bench -p rooste-term
+      - run: cargo bench -p rooste-terminal

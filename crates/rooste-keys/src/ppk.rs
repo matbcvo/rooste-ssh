@@ -245,7 +245,7 @@ fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::keygen::{KeyType, generate};
+    use crate::generation::{KeyType, generate};
 
     #[test]
     fn base64_matches_the_standard() {

@@ -1,7 +1,7 @@
 //! Terminal throughput: how fast output is parsed and the screen resolved.
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use rooste_term::Terminal;
+use rooste_terminal::Terminal;
 
 /// About 1 MiB of typical output: colored `ls`-style lines and plain text.
 fn sample() -> Vec<u8> {

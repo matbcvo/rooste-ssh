@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use egui_kittest::Harness;
 use rooste_gui::terminal_view::TerminalView;
-use rooste_term::Terminal;
+use rooste_terminal::Terminal;
 
 fn demo() -> String {
     let mut s = String::new();
@@ -51,7 +51,7 @@ fn render_terminal() {
     let (terminal, _) = harness.state_mut();
     terminal.advance(b"\x1b[2J\x1b[H");
     terminal.advance(demo().as_bytes());
-    terminal.select_start(0, 7, false, rooste_term::SelectionKind::Simple);
+    terminal.select_start(0, 7, false, rooste_terminal::SelectionKind::Simple);
     terminal.select_update(7, 7, true);
     harness.run();
 
@@ -100,7 +100,7 @@ fn render_app() {
     let server = net.block_on(TestServer::start());
     let dir = tempfile::tempdir().unwrap();
     let known_hosts = dir.path().join("known_hosts");
-    rooste_proto::ssh::known_hosts::learn(
+    rooste_protocols::ssh::known_hosts::learn(
         &known_hosts,
         "127.0.0.1",
         server.addr.port(),
@@ -237,7 +237,7 @@ fn render_failed_tab() {
     let server = net.block_on(TestServer::start());
     let dir = tempfile::tempdir().unwrap();
     let known_hosts = dir.path().join("known_hosts");
-    rooste_proto::ssh::known_hosts::learn(
+    rooste_protocols::ssh::known_hosts::learn(
         &known_hosts,
         "127.0.0.1",
         server.addr.port(),
@@ -313,7 +313,7 @@ fn render_files_panel() {
     }
     let dir = tempfile::tempdir().unwrap();
     let known_hosts = dir.path().join("known_hosts");
-    rooste_proto::ssh::known_hosts::learn(
+    rooste_protocols::ssh::known_hosts::learn(
         &known_hosts,
         "127.0.0.1",
         server.addr.port(),

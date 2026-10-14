@@ -2,8 +2,8 @@
 //!
 //! ```no_run
 //! # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
-//! use rooste_proto::Transport;
-//! use rooste_proto::ssh::{Auth, PtyRequest, SshConfig, connect};
+//! use rooste_protocols::Transport;
+//! use rooste_protocols::ssh::{Auth, PtyRequest, SshConfig, connect};
 //!
 //! let mut client = connect(&SshConfig::new("example.com", 22)).await?;
 //! client.authenticate("me", &Auth::password("secret")).await?;
