@@ -1,0 +1,13 @@
+[package]
+name = "rooste-testkit"
+description = "Shared test fixtures: SSH test servers, keys and known_hosts helpers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true

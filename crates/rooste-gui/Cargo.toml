@@ -1,0 +1,17 @@
+[package]
+name = "rooste-gui"
+description = "rooste-ssh desktop application"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "rooste"
+path = "src/main.rs"
+
+[lints]
+workspace = true

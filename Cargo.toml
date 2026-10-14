@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/matbcvo/rooste-ssh"
+authors = ["Martin Vooremäe"]
+
+[workspace.dependencies]
+rooste-core = { path = "crates/rooste-core" }
+rooste-proto = { path = "crates/rooste-proto" }
+rooste-term = { path = "crates/rooste-term" }
+rooste-keys = { path = "crates/rooste-keys" }
+rooste-sftp = { path = "crates/rooste-sftp" }
+rooste-testkit = { path = "crates/rooste-testkit" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
