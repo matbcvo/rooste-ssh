@@ -1076,6 +1076,92 @@ fn tunnel_editor_validates() {
     assert_eq!(saved.profiles[0].tunnels[0].target, "nohost:5432");
 }
 
+// ---- Updates -----------------------------------------------------------
+
+/// Serve `body` as the latest-release JSON to every request; returns the URL.
+fn release_api(body: &'static str) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/releases/latest", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for socket in listener.incoming().flatten() {
+            let mut socket = socket;
+            let mut request = [0u8; 2048];
+            let _ = socket.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes());
+        }
+    });
+    url
+}
+
+const NEWER: &str =
+    r#"{"tag_name":"v9.9.9","html_url":"https://example.com/releases/9.9.9","assets":[]}"#;
+
+#[test]
+fn new_version_banner_can_be_skipped() {
+    let f = Fixture::new();
+    let api = release_api(NEWER);
+    let app = f
+        .app(Config::default())
+        .with_update_api(api.clone())
+        .with_update_check();
+    let mut harness = harness(app);
+    wait_for(&mut harness, "banner", |app| app.update_banner.is_some());
+    settle(&mut harness);
+    harness.get_by_label(&format!(
+        "Rooste SSH 9.9.9 is available (you have {}).",
+        env!("CARGO_PKG_VERSION")
+    ));
+    click(&mut harness, "Skip this version");
+    assert!(harness.state().update_banner.is_none());
+    assert_eq!(f.saved_config().settings.skipped_version, "9.9.9");
+
+    // At the next start the skipped version is not announced again...
+    let app = f
+        .app(f.saved_config())
+        .with_update_api(api)
+        .with_update_check();
+    let mut harness = self::harness(app);
+    for _ in 0..50 {
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(harness.state().update_banner.is_none());
+
+    // ...but checking by hand still shows it.
+    open_menu_item(&mut harness, "Help", "Check for updates");
+    wait_for(&mut harness, "banner again", |app| {
+        app.update_banner.is_some()
+    });
+}
+
+#[test]
+fn checking_by_hand_reports_up_to_date() {
+    let f = Fixture::new();
+    let current = Box::leak(
+        format!(
+            r#"{{"tag_name":"v{}","html_url":"https://example.com/r","assets":[]}}"#,
+            env!("CARGO_PKG_VERSION")
+        )
+        .into_boxed_str(),
+    );
+    let app = f
+        .app(Config::default())
+        .with_update_api(release_api(current));
+    let mut harness = harness(app);
+    open_menu_item(&mut harness, "Help", "Check for updates");
+    wait_for(&mut harness, "up to date", |app| {
+        app.notice
+            .as_ref()
+            .is_some_and(|n| n.text.starts_with("You have the latest version"))
+    });
+    assert!(harness.state().update_banner.is_none());
+}
+
 // ---- M5: built-in tools ----------------------------------------------------
 
 /// A file dropped onto the window (egui only defines the trait).

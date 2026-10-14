@@ -227,6 +227,8 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
 }
 
 /// The rooste-ssh application.
+type UpdateReceiver = std::sync::mpsc::Receiver<Result<Option<crate::update::Release>, String>>;
+
 pub struct RoosteApp {
     runtime: tokio::runtime::Runtime,
     pub config: Config,
@@ -245,7 +247,14 @@ pub struct RoosteApp {
     /// The built-in SSH agent, once started.
     pub builtin_agent: Option<rooste_keys::Agent>,
     /// Result of the startup update check, when it finishes.
-    update_check: Option<std::sync::mpsc::Receiver<Option<crate::update::Release>>>,
+    /// A running update check, and whether the user asked for it.
+    update_check: Option<(UpdateReceiver, bool)>,
+    /// Where update checks ask; overridable for tests.
+    update_api: String,
+    /// A newer release to tell the user about, in a banner.
+    pub update_banner: Option<crate::update::Release>,
+    /// The UI context, once known, to wake the UI from background threads.
+    ctx: Option<egui::Context>,
     /// Serial ports found when the profile editor opened.
     serial_ports: Vec<String>,
     /// Native file dialogs for the "Browse…" buttons.
@@ -323,6 +332,9 @@ impl RoosteApp {
             agent: AgentSource::Default,
             builtin_agent: None,
             update_check: None,
+            update_api: crate::update::RELEASES_API.into(),
+            update_banner: None,
+            ctx: None,
             serial_ports: Vec::new(),
             picker,
             log_target: None,
@@ -342,19 +354,117 @@ impl RoosteApp {
     /// Check GitHub for a newer release in the background, if enabled.
     pub fn with_update_check(mut self) -> Self {
         if self.config.settings.check_updates {
-            let (tx, rx) = std::sync::mpsc::channel();
-            std::thread::spawn(move || {
-                let latest = crate::update::fetch_latest(
-                    crate::update::RELEASES_API,
-                    env!("CARGO_PKG_VERSION"),
-                )
-                .ok()
-                .flatten();
-                let _ = tx.send(latest);
-            });
-            self.update_check = Some(rx);
+            self.check_for_updates(false);
         }
         self
+    }
+
+    /// The UI context, so background work can wake the UI.
+    pub fn with_context(mut self, ctx: egui::Context) -> Self {
+        self.ctx = Some(ctx);
+        self
+    }
+
+    /// Ask this URL instead of GitHub for the latest release (tests).
+    pub fn with_update_api(mut self, url: impl Into<String>) -> Self {
+        self.update_api = url.into();
+        self
+    }
+
+    /// Look for a newer release in the background. A check the user asked
+    /// for also reports "up to date" and errors, and ignores a skipped
+    /// version.
+    pub fn check_for_updates(&mut self, manual: bool) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let api = self.update_api.clone();
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            let latest = crate::update::fetch_latest(
+                &api,
+                env!("CARGO_PKG_VERSION"),
+                crate::update::Install::detect(),
+            );
+            let _ = tx.send(latest);
+            if let Some(ctx) = ctx {
+                ctx.request_repaint();
+            }
+        });
+        self.update_check = Some((rx, manual));
+    }
+
+    fn update_result(&mut self) {
+        let Some((rx, manual)) = &self.update_check else {
+            return;
+        };
+        let manual = *manual;
+        let Ok(result) = rx.try_recv() else { return };
+        self.update_check = None;
+        match result {
+            Ok(Some(release)) => {
+                if manual || release.version != self.config.settings.skipped_version {
+                    self.update_banner = Some(release);
+                }
+            }
+            Ok(None) if manual => self.notify(
+                format!(
+                    "You have the latest version of Rooste SSH ({}).",
+                    env!("CARGO_PKG_VERSION")
+                ),
+                false,
+            ),
+            Err(e) if manual => self.notify(format!("Could not check for updates: {e}"), true),
+            _ => {}
+        }
+    }
+
+    /// The "new version" banner below the menu bar.
+    fn update_banner_ui(&mut self, ui: &mut Ui) {
+        let Some(release) = self.update_banner.clone() else {
+            return;
+        };
+        let fill = ui.visuals().faint_bg_color;
+        egui::Panel::top("update-banner")
+            .frame(
+                egui::Frame::side_top_panel(&ui.ctx().global_style())
+                    .fill(fill)
+                    .inner_margin(egui::Margin::symmetric(10, 6)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "Rooste SSH {} is available (you have {}).",
+                            release.version,
+                            env!("CARGO_PKG_VERSION")
+                        ))
+                        .strong(),
+                    );
+                    if ui.button("Release notes").clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(&release.url));
+                    }
+                    if ui.button("Download").clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(&release.download));
+                    }
+                    if ui
+                        .button("Skip this version")
+                        .on_hover_text("Don't tell me about this version again")
+                        .clicked()
+                    {
+                        self.config.settings.skipped_version = release.version.clone();
+                        self.save_config();
+                        self.update_banner = None;
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .small_button("✕")
+                            .on_hover_text("Hide until next start")
+                            .clicked()
+                        {
+                            self.update_banner = None;
+                        }
+                    });
+                });
+            });
     }
 
     /// Use a specific SSH agent for login and forwarding.
@@ -891,20 +1001,8 @@ impl RoosteApp {
             self.applied_theme = Some(self.config.settings.theme);
         }
 
-        if let Some(rx) = &self.update_check
-            && let Ok(result) = rx.try_recv()
-        {
-            self.update_check = None;
-            if let Some(release) = result
-                && self.notice.is_none()
-            {
-                self.notice = Some(Notice {
-                    text: format!("Rooste SSH {} is available.", release.version),
-                    error: false,
-                    link: Some(("Download".into(), release.url)),
-                });
-            }
-        }
+        self.ctx.get_or_insert_with(|| ctx.clone());
+        self.update_result();
 
         // Session events and tab actions.
         for id in self.tab_ids() {
@@ -948,6 +1046,7 @@ impl RoosteApp {
         }
 
         self.menu_bar(ui);
+        self.update_banner_ui(ui);
         self.status_bar(ui);
         if self.show_manager {
             let mut action = None;
@@ -1143,6 +1242,20 @@ impl RoosteApp {
                             ui.close();
                         }
                     }
+                });
+                ui.menu_button("Help", |ui| {
+                    if ui.button("Check for updates").clicked() {
+                        self.check_for_updates(true);
+                        ui.close();
+                    }
+                    if ui.button("Project page").clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(
+                            "https://github.com/matbcvo/rooste-ssh",
+                        ));
+                        ui.close();
+                    }
+                    ui.separator();
+                    ui.weak(format!("Rooste SSH {}", env!("CARGO_PKG_VERSION")));
                 });
             });
         });

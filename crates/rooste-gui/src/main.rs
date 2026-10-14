@@ -30,7 +30,11 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             rooste_gui::fonts::install(&cc.egui_ctx);
-            Ok(Box::new(RoosteApp::new().with_update_check()))
+            Ok(Box::new(
+                RoosteApp::new()
+                    .with_context(cc.egui_ctx.clone())
+                    .with_update_check(),
+            ))
         }),
     )
 }
