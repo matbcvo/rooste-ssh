@@ -1,5 +1,5 @@
 ---
-source: crates/rooste-term/tests/conformance.rs
+source: crates/rooste-terminal/tests/conformance.rs
 expression: "screen(10, 2, \"\\x1b[?7l0123456789abc\")"
 ---
 012345678c

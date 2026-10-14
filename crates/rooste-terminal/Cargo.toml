@@ -1,5 +1,5 @@
 [package]
-name = "rooste-term"
+name = "rooste-terminal"
 description = "Terminal emulation: input encoding, selection and scrollback"
 version.workspace = true
 edition.workspace = true

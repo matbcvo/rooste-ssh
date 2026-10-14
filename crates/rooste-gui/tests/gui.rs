@@ -10,7 +10,7 @@ use rooste_core::{Config, MemoryStore, Profile, Theme};
 use rooste_gui::RoosteApp;
 use rooste_gui::app::{Dialog, TabState};
 use rooste_gui::tab::SessionTab;
-use rooste_proto::ssh::known_hosts;
+use rooste_protocols::ssh::known_hosts;
 use rooste_testkit::{TEST_PASSWORD, TEST_USER, TestServer};
 use tempfile::TempDir;
 
@@ -809,7 +809,7 @@ fn jump_host_and_agent_forwarding() {
             profiles: vec![profile],
             ..Config::default()
         })
-        .with_agent(rooste_proto::ssh::AgentSource::Path(
+        .with_agent(rooste_protocols::ssh::AgentSource::Path(
             agent.path().to_owned(),
         ));
     let mut harness = harness(app);

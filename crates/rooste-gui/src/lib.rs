@@ -1,7 +1,7 @@
 //! rooste-ssh desktop application.
 
 pub mod app;
-pub mod boxdraw;
+pub mod box_drawing;
 pub mod dialogs;
 pub mod files;
 pub mod fonts;

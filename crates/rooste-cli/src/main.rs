@@ -11,7 +11,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
 use futures::future::BoxFuture;
-use rooste_proto::ssh::{
+use rooste_protocols::ssh::{
     AgentSource, HostKeyPolicy, HostKeyPrompt, PtyRequest, SshClient, SshConfig, SshError,
     UnknownHostKey, connect, connect_via,
 };

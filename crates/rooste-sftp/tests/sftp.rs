@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use rooste_proto::ssh::{Auth, HostKeyPolicy, SshClient, SshConfig, connect};
+use rooste_protocols::ssh::{Auth, HostKeyPolicy, SshClient, SshConfig, connect};
 use rooste_sftp::{EntryKind, Sftp, SftpError};
 use rooste_testkit::{OpenSshFixture, TEST_PASSWORD, TEST_USER, TestServer, private_key};
 use tempfile::TempDir;

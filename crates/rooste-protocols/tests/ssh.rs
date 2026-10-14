@@ -6,8 +6,8 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use rooste_proto::Transport;
-use rooste_proto::ssh::{
+use rooste_protocols::Transport;
+use rooste_protocols::ssh::{
     AgentSource, Auth, HostKeyPolicy, HostKeyPrompt, PtyRequest, SshClient, SshConfig, SshError,
     UnknownHostKey, connect, known_hosts, load_private_key,
 };

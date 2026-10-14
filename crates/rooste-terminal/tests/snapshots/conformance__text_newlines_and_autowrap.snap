@@ -1,5 +1,5 @@
 ---
-source: crates/rooste-term/tests/conformance.rs
+source: crates/rooste-terminal/tests/conformance.rs
 expression: "screen(10, 4, \"hello\\r\\nworld\\r\\n0123456789abc\")"
 ---
 hello

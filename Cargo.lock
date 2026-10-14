@@ -4446,8 +4446,8 @@ dependencies = [
  "crossterm",
  "futures",
  "rooste-core",
- "rooste-proto",
- "rooste-term",
+ "rooste-protocols",
+ "rooste-terminal",
  "rpassword",
  "tokio",
 ]
@@ -4479,9 +4479,9 @@ dependencies = [
  "rfd",
  "rooste-core",
  "rooste-keys",
- "rooste-proto",
+ "rooste-protocols",
  "rooste-sftp",
- "rooste-term",
+ "rooste-terminal",
  "rooste-testkit",
  "russh",
  "serde",
@@ -4501,7 +4501,7 @@ dependencies = [
  "hex",
  "hmac",
  "rand",
- "rooste-proto",
+ "rooste-protocols",
  "rooste-testkit",
  "russh",
  "sha2",
@@ -4512,7 +4512,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rooste-proto"
+name = "rooste-protocols"
 version = "0.1.0"
 dependencies = [
  "aes",
@@ -4533,7 +4533,7 @@ dependencies = [
 name = "rooste-sftp"
 version = "0.1.0"
 dependencies = [
- "rooste-proto",
+ "rooste-protocols",
  "rooste-testkit",
  "russh-sftp",
  "tempfile",
@@ -4542,7 +4542,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rooste-term"
+name = "rooste-terminal"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",

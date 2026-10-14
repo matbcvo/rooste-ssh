@@ -7,8 +7,8 @@ use std::sync::mpsc as std_mpsc;
 
 use futures::future::BoxFuture;
 use rooste_core::{Destination, Protocol, SerialSettings, Tunnel, TunnelKind};
-use rooste_proto::Transport;
-use rooste_proto::ssh::{
+use rooste_protocols::Transport;
+use rooste_protocols::ssh::{
     AgentSource, Auth, Forward, HostKeyPolicy, HostKeyPrompt, PtyRequest, SshClient, SshConfig,
     SshError, UnknownHostKey, connect, connect_via, load_private_key,
 };
@@ -231,7 +231,7 @@ async fn run(
                 "Connecting to {}:{}…",
                 request.host, request.port
             )));
-            let transport = rooste_proto::telnet::TelnetTransport::connect(
+            let transport = rooste_protocols::telnet::TelnetTransport::connect(
                 &request.host,
                 request.port,
                 timeout,
@@ -249,7 +249,7 @@ async fn run(
                 request.host, request.port
             )));
             let transport =
-                rooste_proto::raw::RawTransport::connect(&request.host, request.port, timeout)
+                rooste_protocols::raw::RawTransport::connect(&request.host, request.port, timeout)
                     .await
                     .map_err(open_error)?;
             pump(transport, commands, sink).await
@@ -261,15 +261,15 @@ async fn run(
                 request.host,
                 request.serial.describe()
             )));
-            let transport = rooste_proto::serial::SerialTransport::open(&request.host, options)
+            let transport = rooste_protocols::serial::SerialTransport::open(&request.host, options)
                 .map_err(|e| Failure::new(format!("Could not open the serial port: {e}")))?;
             pump(transport, commands, sink).await
         }
     }
 }
 
-fn serial_options(settings: &SerialSettings) -> rooste_proto::serial::SerialOptions {
-    use rooste_proto::serial::{SerialFlow, SerialOptions, SerialParity};
+fn serial_options(settings: &SerialSettings) -> rooste_protocols::serial::SerialOptions {
+    use rooste_protocols::serial::{SerialFlow, SerialOptions, SerialParity};
     SerialOptions {
         baud: settings.baud,
         data_bits: settings.data_bits,
@@ -562,7 +562,7 @@ async fn authenticate(
 }
 
 async fn try_password(
-    client: &mut rooste_proto::ssh::SshClient,
+    client: &mut rooste_protocols::ssh::SshClient,
     user: &str,
     password: &str,
 ) -> Result<bool, String> {
@@ -578,7 +578,7 @@ async fn load_key(
     path: &std::path::Path,
     passphrase: Option<&str>,
     sink: &EventSink,
-) -> Result<Option<rooste_proto::ssh::PrivateKey>, String> {
+) -> Result<Option<rooste_protocols::ssh::PrivateKey>, String> {
     match load_private_key(path, passphrase) {
         Ok(key) => return Ok(Some(key)),
         Err(SshError::KeyEncrypted(_)) => {}

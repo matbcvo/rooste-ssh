@@ -7,8 +7,8 @@ use egui::{
     Color32, CornerRadius, Event, FontId, PointerButton, Pos2, Rect, Response, Sense, Stroke,
     StrokeKind, Ui, Vec2, pos2, vec2,
 };
-use rooste_term::input::{self, MouseAction, MouseButton};
-use rooste_term::{CursorShape, MouseReport, Rgb, Screen, SelectionKind, Terminal};
+use rooste_terminal::input::{self, MouseAction, MouseButton};
+use rooste_terminal::{CursorShape, MouseReport, Rgb, Screen, SelectionKind, Terminal};
 
 use crate::keys::{Action, KeyTranslator};
 
@@ -368,7 +368,7 @@ impl TerminalView {
                 }
                 let x = metrics.origin.x + col as f32 * cell.x;
                 let cell_rect = Rect::from_min_size(pos2(x, y), cell);
-                if crate::boxdraw::draw(&painter, cell_rect, c.ch, color(c.fg)) {
+                if crate::box_drawing::draw(&painter, cell_rect, c.ch, color(c.fg)) {
                     col += 1;
                     continue;
                 }

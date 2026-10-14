@@ -2,7 +2,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use rooste_term::Terminal;
+use rooste_terminal::Terminal;
 
 fuzz_target!(|data: &[u8]| {
     let mut term = Terminal::new(40, 12);

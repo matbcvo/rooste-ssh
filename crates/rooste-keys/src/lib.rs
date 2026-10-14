@@ -2,11 +2,11 @@
 //! and a built-in SSH agent.
 
 pub mod agent;
-pub mod keygen;
+pub mod generation;
 pub mod ppk;
 
 pub use agent::Agent;
-pub use keygen::KeyType;
+pub use generation::KeyType;
 pub use russh::keys::{PrivateKey, PublicKey};
 
 #[derive(Debug, thiserror::Error)]

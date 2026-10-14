@@ -209,7 +209,7 @@ const REMOVE_ALL_IDENTITIES: u8 = 19;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::keygen::{KeyType, generate};
+    use crate::generation::{KeyType, generate};
 
     #[tokio::test]
     async fn add_list_and_remove_keys() {

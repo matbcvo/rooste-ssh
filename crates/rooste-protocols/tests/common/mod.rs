@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use rooste_proto::Transport;
-use rooste_proto::ssh::SshShell;
+use rooste_protocols::Transport;
+use rooste_protocols::ssh::SshShell;
 
 /// Read from the shell until `needle` appears; returns everything read.
 pub async fn read_until(shell: &mut SshShell, needle: &str) -> String {

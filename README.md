@@ -69,8 +69,8 @@ cargo nextest run --workspace --run-ignored only
 | Crate | Purpose |
 |---|---|
 | `rooste-core` | Session/profile model, config, `ssh_config` and session import |
-| `rooste-proto` | `Transport` trait: SSH, telnet, raw TCP and serial |
-| `rooste-term` | Terminal emulation (`alacritty_terminal`) |
+| `rooste-protocols` | `Transport` trait: SSH, telnet, raw TCP and serial |
+| `rooste-terminal` | Terminal emulation (`alacritty_terminal`) |
 | `rooste-keys` | Key generation, `.ppk` import, agent |
 | `rooste-sftp` | SFTP over an SSH connection: listing, transfers with progress |
 | `rooste-gui` | Desktop application (egui) |

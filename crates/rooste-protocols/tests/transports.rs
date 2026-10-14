@@ -4,9 +4,9 @@
 
 use std::time::Duration;
 
-use rooste_proto::Transport;
-use rooste_proto::raw::RawTransport;
-use rooste_proto::telnet::TelnetTransport;
+use rooste_protocols::Transport;
+use rooste_protocols::raw::RawTransport;
+use rooste_protocols::telnet::TelnetTransport;
 use rooste_testkit::{EchoServer, TelnetServer};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -114,7 +114,7 @@ async fn telnet_negotiation_size_and_terminal_type() {
 #[cfg(unix)]
 #[tokio::test]
 async fn serial_pseudo_terminal_pair() {
-    use rooste_proto::serial::SerialTransport;
+    use rooste_protocols::serial::SerialTransport;
     use serial2_tokio::SerialPort;
 
     let (ours, theirs) = SerialPort::pair().expect("pty pair");
@@ -135,7 +135,7 @@ async fn serial_pseudo_terminal_pair() {
 #[test]
 fn serial_port_listing_does_not_fail() {
     // Machines may have no ports; listing must still work.
-    let _ = rooste_proto::serial::available_ports();
+    let _ = rooste_protocols::serial::available_ports();
 }
 
 #[test]
@@ -145,7 +145,8 @@ fn opening_a_missing_serial_port_names_it() {
     } else {
         "/dev/rooste-no-such-port"
     };
-    let err = rooste_proto::serial::SerialTransport::open(missing, Default::default()).unwrap_err();
+    let err =
+        rooste_protocols::serial::SerialTransport::open(missing, Default::default()).unwrap_err();
     assert!(err.to_string().contains(missing), "{err}");
 }
 

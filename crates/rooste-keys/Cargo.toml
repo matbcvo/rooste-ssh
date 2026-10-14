@@ -25,7 +25,7 @@ tokio.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-rooste-proto.workspace = true
+rooste-protocols.workspace = true
 rooste-testkit.workspace = true
 
 [lints]

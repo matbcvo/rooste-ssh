@@ -15,8 +15,8 @@ clap.workspace = true
 crossterm.workspace = true
 futures.workspace = true
 rooste-core.workspace = true
-rooste-proto.workspace = true
-rooste-term.workspace = true
+rooste-protocols.workspace = true
+rooste-terminal.workspace = true
 rpassword.workspace = true
 tokio.workspace = true
 

@@ -2,8 +2,8 @@
 //! as text; files under `snapshots/` are reviewed `insta` snapshots.
 
 use insta::assert_snapshot;
-use rooste_term::input::InputMode;
-use rooste_term::{MouseReport, Palette, Rgb, SelectionKind, TermEvent, Terminal};
+use rooste_terminal::input::InputMode;
+use rooste_terminal::{MouseReport, Palette, Rgb, SelectionKind, TermEvent, Terminal};
 
 fn term(cols: u16, rows: u16, input: &str) -> Terminal {
     let mut t = Terminal::new(cols, rows);

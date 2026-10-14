@@ -10,7 +10,7 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-rooste-proto.workspace = true
+rooste-protocols.workspace = true
 russh-sftp.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

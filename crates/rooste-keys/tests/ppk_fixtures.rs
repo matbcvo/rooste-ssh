@@ -60,7 +60,7 @@ fn reexported_keys_import_again() {
 
 #[test]
 fn ssh_layer_loads_ppk_and_asks_for_passphrases() {
-    use rooste_proto::ssh::{SshError, load_private_key};
+    use rooste_protocols::ssh::{SshError, load_private_key};
     let dir = key_path("ppk");
     assert!(load_private_key(&dir.join("v3-ed25519.ppk"), None).is_ok());
     let encrypted = dir.join("v3-ed25519-encrypted.ppk");
@@ -85,14 +85,14 @@ fn export_for_puttygen() {
         ("ed25519", rooste_keys::KeyType::Ed25519),
         ("ecdsa", rooste_keys::KeyType::EcdsaP256),
     ] {
-        let key = rooste_keys::keygen::generate(kind, &format!("exported-{name}")).unwrap();
+        let key = rooste_keys::generation::generate(kind, &format!("exported-{name}")).unwrap();
         for (suffix, passphrase) in [("plain", None), ("encrypted", Some("rooste"))] {
             let text = ppk::export(&key, passphrase).unwrap();
             std::fs::write(dir.join(format!("{name}-{suffix}.ppk")), text).unwrap();
         }
         std::fs::write(
             dir.join(format!("{name}.pub")),
-            rooste_keys::keygen::public_line(key.public_key()),
+            rooste_keys::generation::public_line(key.public_key()),
         )
         .unwrap();
     }
@@ -105,7 +105,7 @@ fn export_for_puttygen() {
     .unwrap();
     std::fs::write(
         dir.join("rsa.pub"),
-        rooste_keys::keygen::public_line(rsa.public_key()),
+        rooste_keys::generation::public_line(rsa.public_key()),
     )
     .unwrap();
 }

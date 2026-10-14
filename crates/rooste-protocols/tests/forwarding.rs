@@ -5,8 +5,8 @@ mod common;
 
 use std::time::Duration;
 
-use rooste_proto::Transport;
-use rooste_proto::ssh::{
+use rooste_protocols::Transport;
+use rooste_protocols::ssh::{
     AgentSource, Auth, ForwardKind, HostKeyPolicy, PtyRequest, SshClient, SshConfig, SshError,
     connect, connect_via,
 };
