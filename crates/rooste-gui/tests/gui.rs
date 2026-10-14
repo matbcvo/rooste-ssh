@@ -1054,11 +1054,13 @@ fn file_panel_uploads_folders() {
     std::fs::create_dir_all(project.join("src")).unwrap();
     std::fs::write(project.join("README"), "read me").unwrap();
     std::fs::write(project.join("src").join("main.rs"), "fn main() {}").unwrap();
-    let mut config = Config::default();
-    config.profiles = vec![Profile {
-        save_password: true,
-        ..f.profile("files")
-    }];
+    let config = Config {
+        profiles: vec![Profile {
+            save_password: true,
+            ..f.profile("files")
+        }],
+        ..Config::default()
+    };
     let id = config.profiles[0].id.clone();
     let app = f.app(config);
     app.secrets().set(&id, TEST_PASSWORD).unwrap();
