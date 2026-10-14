@@ -392,17 +392,55 @@ fn render_files_panel() {
     image.save(out.join("files-panel.png")).unwrap();
 }
 
-/// Screenshots for the README: saved sessions, a terminal with some
-/// colored output and the file panel, in the dark and light themes.
+/// Screenshots for the README, written to `target/screenshots/readme-*.png`:
+/// two sessions side by side, the file panel, the session editor, search,
+/// the command palette, the key generator, and the light theme.
 #[test]
 #[ignore = "renders with wgpu; run manually to inspect the output"]
 fn render_readme() {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use rooste_core::{Config, MemoryStore, Profile, Theme};
+    use egui_kittest::kittest::Queryable;
+    use rooste_core::{Config, MemoryStore, Profile, Theme, Tunnel, TunnelKind};
     use rooste_gui::RoosteApp;
+    use rooste_gui::app::TabState;
     use rooste_testkit::{TEST_PASSWORD, TEST_USER, TestServer};
+
+    const PROMPT_WEB: &str = "\x1b[1;32mdeploy@web-1\x1b[0m:\x1b[1;34m~\x1b[0m$ ";
+    const PROMPT_DB: &str = "\x1b[1;32mdeploy@db-primary\x1b[0m:\x1b[1;34m~\x1b[0m$ ";
+    // Short lines, so both halves of the split view fit without wrapping.
+    let web_output = format!(
+        "{PROMPT_WEB}systemctl is-active nginx php8.3-fpm\r\n\
+         \x1b[1;32mactive\x1b[0m\r\n\
+         \x1b[1;32mactive\x1b[0m\r\n\
+         {PROMPT_WEB}ls -l --color\r\n\
+         drwxr-xr-x 2 deploy deploy 4.0K Oct 14 \x1b[1;34mlogs\x1b[0m\r\n\
+         drwxr-xr-x 5 deploy deploy 4.0K Oct 13 \x1b[1;34mreleases\x1b[0m\r\n\
+         -rw-r--r-- 1 deploy deploy  48K Oct 13 \x1b[1;31mbackup.tar.gz\x1b[0m\r\n\
+         -rwxr-xr-x 1 deploy deploy  900 Oct 12 \x1b[1;32mdeploy.sh\x1b[0m\r\n\
+         -rw-r--r-- 1 deploy deploy 2.4K Oct 10 nginx.conf\r\n\
+         {PROMPT_WEB}tail -n 5 logs/access.log\r\n\
+         16:02:11  GET   /api/health      \x1b[32m200\x1b[0m    3 ms\r\n\
+         16:02:13  POST  /api/orders      \x1b[32m201\x1b[0m   48 ms\r\n\
+         16:02:14  GET   /api/orders/88   \x1b[33m404\x1b[0m    5 ms\r\n\
+         16:02:17  POST  /api/payments    \x1b[31m502\x1b[0m  930 ms\r\n\
+         16:02:19  GET   /api/health      \x1b[32m200\x1b[0m    2 ms\r\n\
+         {PROMPT_WEB}"
+    );
+    let db_output = format!(
+        "{PROMPT_DB}psql -c 'select count(*) from orders'\r\n\
+         \x20count\r\n\
+         -------\r\n\
+         \x2048213\r\n\
+         (1 row)\r\n\
+         {PROMPT_DB}df -h /srv\r\n\
+         Filesystem      Size  Used Avail Use% Mounted on\r\n\
+         /dev/nvme1n1    500G  212G  288G  \x1b[32m43%\x1b[0m /srv\r\n\
+         {PROMPT_DB}uptime\r\n\
+         \x2016:02:31 up 41 days, load average: 0.42, 0.38, 0.35\r\n\
+         {PROMPT_DB}"
+    );
 
     let net = tokio::runtime::Runtime::new().unwrap();
     let server = net.block_on(TestServer::start());
@@ -434,86 +472,166 @@ fn render_readme() {
         save_password: true,
         ..Profile::default()
     };
-    let output = concat!(
-        "\x1b[1;32mdeploy@web-1\x1b[0m:\x1b[1;34m~\x1b[0m$ systemctl status nginx --no-pager\r\n",
-        "\x1b[1;32m●\x1b[0m nginx.service - A high performance web server\r\n",
-        "     Loaded: loaded (/lib/systemd/system/nginx.service; \x1b[1;32menabled\x1b[0m)\r\n",
-        "     Active: \x1b[1;32mactive (running)\x1b[0m since Tue 2026-10-13 09:12:44 UTC; 1 day ago\r\n",
-        "   Main PID: 812 (nginx)\r\n",
-        "      Tasks: 5 (limit: 9425)\r\n",
-        "     Memory: 11.2M\r\n",
-        "\r\n",
-        "\x1b[1;32mdeploy@web-1\x1b[0m:\x1b[1;34m~\x1b[0m$ ls -l --color\r\n",
-        "drwxr-xr-x 2 deploy deploy 4096 Oct 14 08:01 \x1b[1;34mlogs\x1b[0m\r\n",
-        "drwxr-xr-x 5 deploy deploy 4096 Oct 13 17:40 \x1b[1;34mreleases\x1b[0m\r\n",
-        "-rw-r--r-- 1 deploy deploy  48K Oct 13 03:00 \x1b[1;31mbackup-2026-10-13.tar.gz\x1b[0m\r\n",
-        "-rwxr-xr-x 1 deploy deploy  900 Oct 12 11:24 \x1b[1;32mdeploy.sh\x1b[0m\r\n",
-        "-rw-r--r-- 1 deploy deploy 2.4K Oct 10 14:02 nginx.conf\r\n",
-        "\r\n",
-        "\x1b[1;32mdeploy@web-1\x1b[0m:\x1b[1;34m~\x1b[0m$ ",
-    );
+    // Shown in the session editor (never connected).
+    let web2 = Profile {
+        proxy_jump: Some("bastion.example.com".into()),
+        tags: vec!["nginx".into(), "eu-west".into()],
+        tunnels: vec![
+            Tunnel {
+                kind: TunnelKind::Local,
+                listen: "5432".into(),
+                target: "db.internal:5432".into(),
+            },
+            Tunnel {
+                kind: TunnelKind::Dynamic,
+                listen: "1080".into(),
+                target: String::new(),
+            },
+        ],
+        ..p("web-2", "Production")
+    };
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
     std::fs::create_dir_all(&out).unwrap();
-    for theme in [Theme::Dark, Theme::Light] {
-        let dir = tempfile::tempdir().unwrap();
-        let known_hosts = dir.path().join("known_hosts");
-        rooste_protocols::ssh::known_hosts::learn(
-            &known_hosts,
-            "127.0.0.1",
-            server.addr.port(),
-            &server.host_key,
-        )
-        .unwrap();
-        let mut config = Config {
-            profiles: vec![
-                live.clone(),
-                p("web-2", "Production"),
-                p("db-primary", "Production"),
-                p("staging", "Staging"),
-                p("Raspberry Pi", "Home"),
-                p("NAS", "Home"),
-            ],
-            ..Config::default()
+
+    // A window connected to web-1, with `setup` run before rendering.
+    let shot =
+        |name: &str, theme: Theme, height: f32, setup: &dyn Fn(&mut Harness<'_, RoosteApp>)| {
+            let dir = tempfile::tempdir().unwrap();
+            let known_hosts = dir.path().join("known_hosts");
+            rooste_protocols::ssh::known_hosts::learn(
+                &known_hosts,
+                "127.0.0.1",
+                server.addr.port(),
+                &server.host_key,
+            )
+            .unwrap();
+            let mut config = Config {
+                profiles: vec![
+                    live.clone(),
+                    web2.clone(),
+                    p("db-primary", "Production"),
+                    p("staging", "Staging"),
+                    p("Raspberry Pi", "Home"),
+                    p("NAS", "Home"),
+                ],
+                ..Config::default()
+            };
+            config.settings.theme = theme;
+            let app = RoosteApp::with_config(config, None, Arc::new(MemoryStore::default()))
+                .with_known_hosts(known_hosts);
+            app.secrets().set(&live.id, TEST_PASSWORD).unwrap();
+            let mut harness = Harness::builder()
+                .with_size([1280.0, height])
+                .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
+            rooste_gui::fonts::install(&harness.ctx);
+            let ctx = harness.ctx.clone();
+            harness.state_mut().connect_profile(&ctx, &live.id);
+            wait(&mut harness, |app| {
+                app.tabs().any(|t| t.state == TabState::Connected)
+            });
+            setup(&mut harness);
+            // Keep the mouse pointer out of the picture.
+            harness.event(egui::Event::PointerGone);
+            for _ in 0..8 {
+                harness.step();
+            }
+            harness
+                .render()
+                .expect("render with wgpu")
+                .save(out.join(format!("readme-{name}.png")))
+                .unwrap();
         };
-        config.settings.theme = theme;
-        let app = RoosteApp::with_config(config, None, Arc::new(MemoryStore::default()))
-            .with_known_hosts(known_hosts);
-        app.secrets().set(&live.id, TEST_PASSWORD).unwrap();
-        let mut harness = Harness::builder()
-            .with_size([1280.0, 720.0])
-            .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
-        rooste_gui::fonts::install(&harness.ctx);
-        let ctx = harness.ctx.clone();
-        harness.state_mut().connect_profile(&ctx, &live.id);
+    fn wait(harness: &mut Harness<'_, RoosteApp>, done: impl Fn(&RoosteApp) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(10);
-        let ready = |app: &RoosteApp| {
+        while !done(harness.state()) {
+            assert!(Instant::now() < deadline, "timed out");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    let fill = |tab: &mut rooste_gui::tab::SessionTab, text: &str| {
+        tab.terminal.advance(b"\x1b[2J\x1b[H");
+        tab.terminal.advance(text.as_bytes());
+    };
+    // web-1 on the left, db-primary split off to the right.
+    let split = |harness: &mut Harness<'_, RoosteApp>| {
+        harness
+            .state_mut()
+            .split_active(egui_tiles::LinearDir::Horizontal);
+        wait(harness, |app| {
+            app.tabs()
+                .filter(|t| t.state == TabState::Connected)
+                .count()
+                == 2
+        });
+        for _ in 0..5 {
+            harness.step();
+        }
+        let mut tabs: Vec<_> = harness.state_mut().tabs_mut().collect();
+        tabs.sort_by_key(|t| t.id);
+        fill(tabs[0], &web_output);
+        tabs[1].name = "db-primary".into();
+        fill(tabs[1], &db_output);
+    };
+
+    shot("split", Theme::Dark, 720.0, &split);
+    shot("light", Theme::Light, 720.0, &split);
+    shot("files", Theme::Dark, 720.0, &|harness| {
+        let tab = harness.state_mut().tabs_mut().next().unwrap();
+        tab.toggle_files();
+        wait(harness, |app| {
             app.tabs()
                 .next()
                 .and_then(|t| t.files.as_ref())
                 .is_some_and(|f| f.entries.len() == 5)
-        };
-        while !ready(harness.state()) {
-            assert!(Instant::now() < deadline);
-            let tab = harness.state_mut().tabs_mut().next().unwrap();
-            if tab.files.is_none() && tab.state == rooste_gui::app::TabState::Connected {
-                tab.toggle_files();
-            }
-            harness.step();
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        });
         let tab = harness.state_mut().tabs_mut().next().unwrap();
-        tab.terminal.advance(b"\x1b[2J\x1b[H");
-        tab.terminal.advance(output.as_bytes());
+        fill(tab, &web_output);
         let files = tab.files.as_mut().unwrap();
         files.selected = vec![files.entries[2].path.clone()];
-        for _ in 0..5 {
-            harness.step();
+    });
+    shot("search", Theme::Dark, 720.0, &|harness| {
+        let tab = harness.state_mut().tabs_mut().next().unwrap();
+        fill(tab, &web_output);
+        tab.open_find();
+        let find = tab.find.as_mut().unwrap();
+        find.query = "api/orders".into();
+        find.found = Some(
+            tab.terminal
+                .find("api/orders", rooste_terminal::SearchDirection::Up),
+        );
+    });
+    shot("editor", Theme::Dark, 960.0, &|harness| {
+        let tab = harness.state_mut().tabs_mut().next().unwrap();
+        fill(tab, &web_output);
+        harness.get_by_label("web-2").hover();
+        harness.step();
+        harness.get_by_label("web-2").click_secondary();
+        harness.step();
+        harness.step();
+        harness.get_by_label("Edit…").click();
+        harness.step();
+    });
+    shot("palette", Theme::Dark, 720.0, &|harness| {
+        let tab = harness.state_mut().tabs_mut().next().unwrap();
+        fill(tab, &web_output);
+        harness.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::P);
+        harness.step();
+        harness.event(egui::Event::Text("split".into()));
+        harness.step();
+    });
+    shot("keygen", Theme::Dark, 720.0, &|harness| {
+        let tab = harness.state_mut().tabs_mut().next().unwrap();
+        fill(tab, &web_output);
+        harness.get_by_label("Tools").click();
+        harness.step();
+        harness.get_by_label("Key generator…").click();
+        harness.step();
+        if let Some(rooste_gui::app::Dialog::KeyGenerator(generator)) =
+            &mut harness.state_mut().dialog
+        {
+            generator.comment = "deploy@laptop".into();
+            generator.path = "~/.ssh/id_ed25519".into();
         }
-        let image = harness.render().expect("render with wgpu");
-        let name = match theme {
-            Theme::Dark => "readme-dark.png",
-            Theme::Light => "readme-light.png",
-        };
-        image.save(out.join(name)).unwrap();
-    }
+    });
 }
