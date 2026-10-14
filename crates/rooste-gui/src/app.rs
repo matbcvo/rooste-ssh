@@ -132,6 +132,7 @@ enum TabMenuAction {
     SplitRight,
     SplitDown,
     Files,
+    Log,
     Reconnect,
     Close,
 }
@@ -189,6 +190,7 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
             return response;
         };
         let ended = tab.has_ended();
+        let logging = tab.log.is_some();
         response.context_menu(|ui| {
             let mut item = |ui: &mut Ui, label: &str, action: TabMenuAction| {
                 if ui.button(label).clicked() {
@@ -200,6 +202,12 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
             item(ui, "Split right", TabMenuAction::SplitRight);
             item(ui, "Split down", TabMenuAction::SplitDown);
             item(ui, "Files (SFTP)", TabMenuAction::Files);
+            let log_label = if logging {
+                "Stop logging"
+            } else {
+                "Start logging…"
+            };
+            item(ui, log_label, TabMenuAction::Log);
             if ended {
                 item(ui, "Reconnect", TabMenuAction::Reconnect);
             }
@@ -241,6 +249,8 @@ pub struct RoosteApp {
     serial_ports: Vec<String>,
     /// Native file dialogs for the "Browse…" buttons.
     pub picker: Picker,
+    /// The tab waiting for the "Start logging…" dialog.
+    log_target: Option<TileId>,
     known_hosts: Option<PathBuf>,
     imports: ImportSources,
     window_title: String,
@@ -314,6 +324,7 @@ impl RoosteApp {
             update_check: None,
             serial_ports: Vec::new(),
             picker,
+            log_target: None,
             known_hosts: None,
             imports: ImportSources::default(),
             window_title: String::new(),
@@ -678,6 +689,7 @@ impl RoosteApp {
                     tab.toggle_files();
                 }
             }
+            TabMenuAction::Log => self.toggle_log(id),
             TabMenuAction::Reconnect => {
                 if let Some(tab) = self.tab_mut(id) {
                     tab.reconnect();
@@ -685,6 +697,30 @@ impl RoosteApp {
             }
             TabMenuAction::Close => self.request_close(id),
         }
+    }
+
+    /// Stop the tab's log, or ask where to start one.
+    fn toggle_log(&mut self, id: TileId) {
+        let log_dir = self.config.settings.log_dir.trim();
+        let dir = if log_dir.is_empty() {
+            theme::download_dir(&self.config.settings)
+        } else {
+            rooste_core::expand_tilde(log_dir)
+        };
+        let Some(tab) = self.tab_mut(id) else { return };
+        if tab.log.is_some() {
+            tab.stop_log();
+            return;
+        }
+        let suggested = dir.join(crate::tab::log_file_name(&tab.name));
+        let ctx = tab.ctx.clone();
+        self.log_target = Some(id);
+        self.picker.open(
+            &ctx,
+            PickId::SessionLog,
+            PickKind::SaveFile,
+            &suggested.display().to_string(),
+        );
     }
 
     fn toggle_broadcast(&mut self) {
@@ -727,6 +763,11 @@ impl RoosteApp {
             Command::SplitDown => self.split_active(LinearDir::Vertical),
             Command::ToggleBroadcast => self.toggle_broadcast(),
             Command::ToggleSessionManager => self.show_manager = !self.show_manager,
+            Command::ToggleLog => {
+                if let Some(id) = self.active_tab_id() {
+                    self.toggle_log(id);
+                }
+            }
             Command::Find => {
                 if let Some(id) = self.active_tab_id()
                     && let Some(tab) = self.tab_mut(id)
@@ -834,6 +875,12 @@ impl RoosteApp {
     pub fn show(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         self.picker.poll();
+        if let Some(path) = self.picker.take(PickId::SessionLog)
+            && let Some(id) = self.log_target.take()
+            && let Some(tab) = self.tab_mut(id)
+        {
+            tab.start_log(&path);
+        }
         // Before the terminal reads keys, so these keys don't reach the shell.
         self.terminal_shortcuts(&ctx);
         if self.applied_theme != Some(self.config.settings.theme) {
@@ -1006,6 +1053,22 @@ impl RoosteApp {
                         .clicked()
                     {
                         self.run_command(&ctx, Command::Find);
+                        ui.close();
+                    }
+                    let logging = self
+                        .active_tab_id()
+                        .and_then(|id| self.tree.tiles.get_pane(&id))
+                        .is_some_and(|tab| tab.log.is_some());
+                    let log_label = if logging {
+                        "Stop logging"
+                    } else {
+                        "Start logging…"
+                    };
+                    if ui
+                        .add_enabled(has_tab, egui::Button::new(log_label))
+                        .clicked()
+                    {
+                        self.run_command(&ctx, Command::ToggleLog);
                         ui.close();
                     }
                     for (label, command) in [

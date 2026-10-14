@@ -6,9 +6,11 @@
 
 pub mod input;
 pub mod palette;
+mod plain_text;
 mod terminal;
 
 pub use palette::{Palette, Rgb};
+pub use plain_text::PlainText;
 pub use terminal::{
     CursorShape, MouseMode, MouseReport, Screen, ScreenCell, SearchDirection, SelectionKind,
     TermEvent, Terminal,

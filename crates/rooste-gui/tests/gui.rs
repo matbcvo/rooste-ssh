@@ -795,6 +795,57 @@ fn find_bar_searches_the_terminal_output() {
 }
 
 #[test]
+fn sessions_are_logged_as_plain_text() {
+    let f = Fixture::with_server();
+    let logs = f.dir.path().join("logs");
+    let mut app = app_with(&f, vec![f.profile("one")]);
+    app.config.settings.log_dir = logs.display().to_string();
+    let mut harness = harness(app);
+    context_menu(&mut harness, "one", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+    wait_for(&mut harness, "prompt", |app| screen_text(app).contains('$'));
+    let read_log = |path: &Path| std::fs::read_to_string(path).unwrap_or_default();
+    let auto_log = first_tab(harness.state())
+        .unwrap()
+        .log
+        .as_ref()
+        .unwrap()
+        .path
+        .clone();
+    assert!(auto_log.starts_with(&logs));
+    assert!(first_tab(harness.state()).unwrap().title().contains('⏺'));
+
+    harness.event(egui::Event::Text("hello log".into()));
+    harness.key_press(egui::Key::Enter);
+    wait_for(&mut harness, "logged", |_| {
+        read_log(&auto_log).contains("echo: hello log\n")
+    });
+    let text = read_log(&auto_log);
+    assert!(text.starts_with("=== one, "), "{text}");
+    assert!(!text.contains('\x1b') && !text.contains('\r'), "{text:?}");
+
+    // Stop logging: later output stays out of the file.
+    open_menu_item(&mut harness, "Tab", "Stop logging");
+    harness.event(egui::Event::Text("not logged".into()));
+    harness.key_press(egui::Key::Enter);
+    wait_for(&mut harness, "echo", |app| {
+        screen_text(app).contains("echo: not logged")
+    });
+    assert!(!read_log(&auto_log).contains("not logged"));
+
+    // Start again by hand, choosing the file.
+    let manual = f.dir.path().join("manual.log");
+    harness.state_mut().picker.fake_answer = Some(manual.clone());
+    open_menu_item(&mut harness, "Tab", "Start logging…");
+    settle(&mut harness);
+    harness.event(egui::Event::Text("by hand".into()));
+    harness.key_press(egui::Key::Enter);
+    wait_for(&mut harness, "manual log", |_| {
+        read_log(&manual).contains("echo: by hand")
+    });
+}
+
+#[test]
 fn split_right_opens_a_second_session_beside_the_first() {
     let f = Fixture::with_server();
     let mut harness = harness(app_with(&f, vec![f.profile("one")]));

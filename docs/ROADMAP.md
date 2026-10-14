@@ -159,7 +159,7 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
 
 ### Later
 Serving Pageant's protocol from the built-in agent (Windows),
-session logging and recording, FIDO2 (`sk-ed25519`) keys, X11 forwarding, scripting or plugins,
+session recordings for playback (plain-text logs are done), FIDO2 (`sk-ed25519`) keys, X11 forwarding, scripting or plugins,
 macOS.
 
 ## Testing strategy

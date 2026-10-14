@@ -488,6 +488,18 @@ impl SettingsEditor {
                             PickId::DownloadDir,
                             PickKind::Folder,
                         );
+                        path_row(
+                            ui,
+                            "Log sessions to",
+                            &mut s.log_dir,
+                            picker,
+                            PickId::LogDir,
+                            PickKind::Folder,
+                        )
+                        .on_hover_text(
+                            "Every session's output is saved as text in this folder. \
+                             Leave empty to log only when you start it from a tab.",
+                        );
                         checkboxes(ui, |ui| {
                             ui.checkbox(&mut s.copy_on_select, "Copy text when selected");
                             ui.checkbox(&mut s.confirm_close, "Ask before closing a connected tab");

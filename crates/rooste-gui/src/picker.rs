@@ -21,6 +21,10 @@ pub enum PickId {
     /// "Upload…" and "Upload folder…" in the file panel.
     UploadFiles,
     UploadFolder,
+    /// Settings: the folder for session logs.
+    LogDir,
+    /// "Start logging…" for a tab.
+    SessionLog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
