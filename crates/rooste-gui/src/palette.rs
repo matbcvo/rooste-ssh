@@ -15,6 +15,7 @@ pub enum Command {
     ImportSshConfig,
     Settings,
     DuplicateTab,
+    ToggleFiles,
     SplitRight,
     SplitDown,
     ToggleBroadcast,
@@ -50,6 +51,7 @@ pub fn commands(profiles: &[Profile], has_tab: bool) -> Vec<(String, Command)> {
     ]);
     if has_tab {
         list.extend([
+            ("Files (SFTP)".to_owned(), Command::ToggleFiles),
             ("Duplicate tab".to_owned(), Command::DuplicateTab),
             ("Split right".to_owned(), Command::SplitRight),
             ("Split down".to_owned(), Command::SplitDown),

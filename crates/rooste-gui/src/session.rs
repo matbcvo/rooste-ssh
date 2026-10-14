@@ -125,6 +125,9 @@ pub enum SessionEvent {
     /// Login succeeded with this password (so the UI may save it).
     PasswordAccepted(String),
     Connected,
+    /// The SFTP session for the file panel is ready.
+    Files(crate::files::FilesHandle),
+    FilesFailed(String),
     Tunnels(Vec<TunnelStatus>),
     Output(Vec<u8>),
     Closed {
@@ -137,6 +140,8 @@ pub enum SessionEvent {
 #[derive(Debug)]
 pub enum SessionCommand {
     Input(Vec<u8>),
+    /// Start SFTP for the file panel.
+    OpenFiles,
     Resize(u16, u16),
     Close,
 }
@@ -306,6 +311,13 @@ async fn run(
                 Some(SessionCommand::Resize(cols, rows)) => {
                     let _ = shell.resize(cols, rows).await;
                 }
+                Some(SessionCommand::OpenFiles) => match rooste_sftp::Sftp::open(&client).await {
+                    Ok(sftp) => {
+                        let home = sftp.home().await.unwrap_or_else(|_| "/".into());
+                        sink.send(SessionEvent::Files(crate::files::spawn(sftp, home, sink.wake.clone())));
+                    }
+                    Err(e) => sink.send(SessionEvent::FilesFailed(format!("SFTP is not available: {e}"))),
+                },
                 Some(SessionCommand::Close) | None => {
                     let _ = shell.close().await;
                     let _ = client.disconnect().await;

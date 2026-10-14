@@ -10,11 +10,14 @@
 //!
 //! `exec` supports `echo <text>`, `exit N` and `agent-keys`.
 //!
+//! The `sftp` subsystem serves [`TestServer::sftp_root`].
+//!
 //! The server also accepts `direct-tcpip` channels (local and dynamic
 //! forwarding) and `tcpip-forward` requests (remote forwarding).
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -34,6 +37,7 @@ pub struct TestServer {
     pub host_key: PublicKey,
     task: JoinHandle<()>,
     sessions: Arc<Mutex<Vec<server::Handle>>>,
+    sftp_root: tempfile::TempDir,
 }
 
 impl TestServer {
@@ -59,6 +63,8 @@ impl TestServer {
             .map(public_key)
             .into();
 
+        let sftp_root = tempfile::tempdir().expect("sftp root");
+        let root = sftp_root.path().to_owned();
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
         let sessions: Arc<Mutex<Vec<server::Handle>>> = Arc::default();
@@ -72,6 +78,8 @@ impl TestServer {
                     shells: HashMap::new(),
                     agent_forwarding: false,
                     forwards: Vec::new(),
+                    channels: HashMap::new(),
+                    sftp_root: root.clone(),
                 };
                 let tracked = tracked.clone();
                 tokio::spawn(async move {
@@ -90,7 +98,13 @@ impl TestServer {
             host_key: host_public,
             task,
             sessions,
+            sftp_root,
         }
+    }
+
+    /// Directory served by the `sftp` subsystem.
+    pub fn sftp_root(&self) -> &Path {
+        self.sftp_root.path()
     }
 
     /// Disconnect every open session (as if the server restarted) while
@@ -130,6 +144,9 @@ struct ShellHandler {
     agent_forwarding: bool,
     /// Listeners for remote forwards; stopped with the session.
     forwards: Vec<JoinHandle<()>>,
+    /// Session channels, kept until a subsystem takes one over.
+    channels: HashMap<ChannelId, Channel<Msg>>,
+    sftp_root: PathBuf,
 }
 
 impl Drop for ShellHandler {
@@ -224,6 +241,7 @@ impl server::Handler for ShellHandler {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         self.shells.insert(channel.id(), FakeShell::default());
+        self.channels.insert(channel.id(), channel);
         reply.accept().await;
         Ok(())
     }
@@ -309,6 +327,25 @@ impl server::Handler for ShellHandler {
         session.exit_status_request(channel, status)?;
         session.eof(channel)?;
         session.close(channel)
+    }
+
+    async fn subsystem_request(
+        &mut self,
+        channel: ChannelId,
+        name: &str,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        match (name, self.channels.remove(&channel)) {
+            ("sftp", Some(stream)) => {
+                // The SFTP server owns this channel's data from now on.
+                self.shells.remove(&channel);
+                session.channel_success(channel)?;
+                let sftp = crate::sftp::DirSftp::new(self.sftp_root.clone());
+                russh_sftp::server::run(stream.into_stream(), sftp).await;
+            }
+            _ => session.channel_failure(channel)?,
+        }
+        Ok(())
     }
 
     async fn agent_request(

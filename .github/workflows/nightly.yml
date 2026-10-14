@@ -64,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [terminal, ssh_config, putty_session, destination]
+        target: [terminal, ssh_config, putty_session, destination, ppk]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly

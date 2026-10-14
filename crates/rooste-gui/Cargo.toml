@@ -21,11 +21,14 @@ egui_tiles.workspace = true
 futures.workspace = true
 keyring.workspace = true
 rooste-core.workspace = true
+rooste-keys.workspace = true
 rooste-proto.workspace = true
+rooste-sftp.workspace = true
 rooste-term.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+rooste-keys.workspace = true
 russh.workspace = true
 egui_kittest.workspace = true
 rooste-testkit.workspace = true
