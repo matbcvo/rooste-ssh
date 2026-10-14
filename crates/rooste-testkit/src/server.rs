@@ -14,6 +14,10 @@
 //!
 //! The server also accepts `direct-tcpip` channels (local and dynamic
 //! forwarding) and `tcpip-forward` requests (remote forwarding).
+//!
+//! On an `x11-req` it opens an X11 channel back to the client, sends an X11
+//! setup request with the cookie it was given and records the first reply
+//! (see [`TestServer::x11_replies`]).
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -38,6 +42,7 @@ pub struct TestServer {
     task: JoinHandle<()>,
     sessions: Arc<Mutex<Vec<server::Handle>>>,
     sftp_root: tempfile::TempDir,
+    x11_replies: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
 impl TestServer {
@@ -92,6 +97,8 @@ impl TestServer {
         let addr = listener.local_addr().expect("local addr");
         let sessions: Arc<Mutex<Vec<server::Handle>>> = Arc::default();
         let tracked = sessions.clone();
+        let x11_replies: Arc<Mutex<Vec<Vec<u8>>>> = Arc::default();
+        let x11_log = x11_replies.clone();
         let task = tokio::spawn(async move {
             while let Ok((socket, _)) = listener.accept().await {
                 let config = config.clone();
@@ -105,6 +112,7 @@ impl TestServer {
                     sftp_root: root.clone(),
                     interactive,
                     interactive_step: 0,
+                    x11_replies: x11_replies.clone(),
                 };
                 let tracked = tracked.clone();
                 tokio::spawn(async move {
@@ -124,7 +132,16 @@ impl TestServer {
             task,
             sessions,
             sftp_root,
+            x11_replies: x11_log,
         }
+    }
+
+    /// What the client's X display answered on forwarded X11 connections.
+    pub fn x11_replies(&self) -> Vec<Vec<u8>> {
+        self.x11_replies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Directory served by the `sftp` subsystem.
@@ -176,6 +193,21 @@ struct ShellHandler {
     interactive: bool,
     /// Keyboard-interactive questions answered correctly so far.
     interactive_step: u8,
+    x11_replies: Arc<Mutex<Vec<Vec<u8>>>>,
+}
+
+/// An X11 setup request (big-endian, protocol 11.0) with this cookie.
+fn x11_setup(protocol: &str, cookie: &[u8]) -> Vec<u8> {
+    let pad = |len: usize| len.div_ceil(4) * 4 - len;
+    let mut out = vec![b'B', 0, 0, 11, 0, 0];
+    out.extend((protocol.len() as u16).to_be_bytes());
+    out.extend((cookie.len() as u16).to_be_bytes());
+    out.extend([0, 0]);
+    out.extend_from_slice(protocol.as_bytes());
+    out.extend(std::iter::repeat_n(0, pad(protocol.len())));
+    out.extend_from_slice(cookie);
+    out.extend(std::iter::repeat_n(0, pad(cookie.len())));
+    out
 }
 
 impl Drop for ShellHandler {
@@ -278,6 +310,43 @@ impl server::Handler for ShellHandler {
         }
         self.user = user.to_owned();
         Ok(Auth::Accept)
+    }
+
+    async fn x11_request(
+        &mut self,
+        channel: ChannelId,
+        _single_connection: bool,
+        protocol: &str,
+        cookie: &str,
+        _screen: u32,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let Ok(cookie) = hex::decode(cookie) else {
+            return Ok(());
+        };
+        let setup = x11_setup(protocol, &cookie);
+        let handle = session.handle();
+        let replies = self.x11_replies.clone();
+        session.channel_success(channel)?;
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let Ok(x11) = handle.channel_open_x11("127.0.0.1", 6000).await else {
+                return;
+            };
+            let mut stream = x11.into_stream();
+            if stream.write_all(&setup).await.is_err() {
+                return;
+            }
+            let mut reply = vec![0u8; 256];
+            if let Ok(n) = stream.read(&mut reply).await {
+                reply.truncate(n);
+                replies
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(reply);
+            }
+        });
+        Ok(())
     }
 
     async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {

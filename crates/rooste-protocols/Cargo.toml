@@ -15,6 +15,7 @@ base64ct.workspace = true
 des.workspace = true
 futures.workspace = true
 md5.workspace = true
+rand.workspace = true
 russh.workspace = true
 serial2-tokio.workspace = true
 thiserror.workspace = true

@@ -32,6 +32,8 @@ pub struct Profile {
     pub proxy_jump: Option<String>,
     /// Forward the local SSH agent to the server.
     pub forward_agent: bool,
+    /// Show the server's graphical (X11) programs on the local display.
+    pub forward_x11: bool,
     /// Port forwards started with the session.
     pub tunnels: Vec<Tunnel>,
     /// Line settings for serial profiles (the port name is in `host`).
@@ -204,6 +206,7 @@ impl Default for Profile {
             allow_legacy: false,
             proxy_jump: None,
             forward_agent: false,
+            forward_x11: false,
             tunnels: Vec::new(),
             serial: SerialSettings::default(),
             notes: String::new(),

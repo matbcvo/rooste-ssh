@@ -9,7 +9,8 @@ use futures::future::BoxFuture;
 use rooste_protocols::Transport;
 use rooste_protocols::ssh::{
     AgentSource, Auth, AuthMethod, HostKeyPolicy, HostKeyPrompt, InteractiveStep, PtyRequest,
-    SshClient, SshConfig, SshError, UnknownHostKey, connect, known_hosts, load_private_key,
+    SshClient, SshConfig, SshError, UnknownHostKey, X11Forwarding, connect, known_hosts,
+    load_private_key,
 };
 use rooste_testkit::{
     TEST_CODE, TEST_KEY_PASSPHRASE, TEST_PASSWORD, TEST_USER, TestAgent, TestServer, key_path,
@@ -395,4 +396,60 @@ async fn keyboard_interactive_wrong_answer_fails() {
             .unwrap(),
         InteractiveStep::Failure
     );
+}
+
+#[tokio::test]
+async fn x11_forwarding_swaps_the_fake_cookie_for_the_real_one() {
+    use rooste_protocols::ssh::x11::{COOKIE_PROTOCOL, X11Cookie, X11Target};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // A local "X server" that checks the cookie it is given.
+    let display = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = display.local_addr().unwrap().port();
+    let real = vec![0x5a; 16];
+    let server = TestServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut client = connected(&server, &dir).await;
+    assert!(
+        client
+            .authenticate(TEST_USER, &Auth::password(TEST_PASSWORD))
+            .await
+            .unwrap()
+    );
+    client.set_x11_forwarding(X11Forwarding {
+        target: X11Target::Tcp {
+            host: "127.0.0.1".into(),
+            port,
+        },
+        screen: 0,
+        cookie: Some(X11Cookie {
+            protocol: COOKIE_PROTOCOL.into(),
+            data: real.clone(),
+        }),
+    });
+    let output = client.exec("echo hi").await.unwrap();
+    assert_eq!(output.stdout, b"hi\n");
+
+    let (mut local, _) = tokio::time::timeout(std::time::Duration::from_secs(10), display.accept())
+        .await
+        .expect("the forwarded X11 connection arrives")
+        .unwrap();
+    let mut setup = vec![0u8; 12 + 20 + 16];
+    local.read_exact(&mut setup).await.unwrap();
+    assert_eq!(&setup[12..30], COOKIE_PROTOCOL.as_bytes());
+    assert_eq!(
+        &setup[32..48],
+        &real[..],
+        "the real cookie reaches the display"
+    );
+    local.write_all(b"X11 OK").await.unwrap();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !server.x11_replies().contains(&b"X11 OK".to_vec()) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the reply reaches the server"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 }

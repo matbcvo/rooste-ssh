@@ -271,8 +271,13 @@ impl ProfileEditor {
                                     }
 
                                     text(ui, "Jump host", &mut self.proxy_jump);
-                                    labeled(ui, "", |ui| {
-                                        ui.checkbox(&mut p.forward_agent, "Forward SSH agent")
+                                    checkboxes(ui, |ui| {
+                                        ui.checkbox(&mut p.forward_agent, "Forward SSH agent");
+                                        ui.checkbox(&mut p.forward_x11, "Forward X11")
+                                            .on_hover_text(
+                                                "Show the server's graphical programs here. \
+                                                 Needs a local X server (on Windows e.g. VcXsrv).",
+                                            );
                                     });
                                 }
                                 text(ui, "Tags", &mut self.tags);

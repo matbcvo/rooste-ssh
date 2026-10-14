@@ -10,8 +10,8 @@ use rooste_core::{Destination, Protocol, SerialSettings, Tunnel, TunnelKind};
 use rooste_protocols::Transport;
 use rooste_protocols::ssh::{
     AgentSource, Auth, AuthMethod, Forward, HostKeyPolicy, HostKeyPrompt, InteractiveStep,
-    PtyRequest, SshClient, SshConfig, SshError, UnknownHostKey, connect, connect_via,
-    load_private_key,
+    PtyRequest, SshClient, SshConfig, SshError, UnknownHostKey, X11Forwarding, connect,
+    connect_via, load_private_key,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -35,6 +35,8 @@ pub struct ConnectRequest {
     /// Jump hosts, as OpenSSH `ProxyJump`.
     pub proxy_jump: Option<String>,
     pub forward_agent: bool,
+    /// Forward X11 to the local display.
+    pub forward_x11: bool,
     /// Agent used for login and forwarding.
     pub agent: AgentSource,
     pub tunnels: Vec<Tunnel>,
@@ -421,6 +423,14 @@ async fn run_ssh(
         ..PtyRequest::default()
     };
     let agent = request.forward_agent.then(|| request.agent.clone());
+    if request.forward_x11 {
+        match X11Forwarding::from_environment() {
+            Ok(forwarding) => client.set_x11_forwarding(forwarding),
+            Err(e) => sink.send(SessionEvent::Output(
+                format!("\x1b[33mX11 forwarding is off: {e}\x1b[0m\r\n").into_bytes(),
+            )),
+        }
+    }
     let mut shell = client.open_shell_with(&pty, agent).await?;
     sink.send(SessionEvent::Connected);
 

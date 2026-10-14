@@ -4521,6 +4521,7 @@ dependencies = [
  "des",
  "futures",
  "md5",
+ "rand",
  "rooste-testkit",
  "russh",
  "serial2-tokio",
@@ -4556,6 +4557,7 @@ name = "rooste-testkit"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "hex",
  "russh",
  "russh-sftp",
  "tempfile",
