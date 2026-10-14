@@ -13,7 +13,7 @@ use clap::{Parser, ValueEnum};
 use futures::future::BoxFuture;
 use rooste_protocols::ssh::{
     AgentSource, HostKeyPolicy, HostKeyPrompt, PtyRequest, SshClient, SshConfig, SshError,
-    UnknownHostKey, connect, connect_via,
+    UnknownHostKey, X11Forwarding, connect, connect_via,
 };
 
 use rooste_core::Destination;
@@ -88,6 +88,10 @@ struct Args {
     /// Forward the SSH agent to the server
     #[arg(short = 'A')]
     forward_agent: bool,
+
+    /// Forward X11 to the local display
+    #[arg(short = 'X')]
+    forward_x11: bool,
 
     /// Only forward ports; no shell or command
     #[arg(short = 'N')]
@@ -185,6 +189,12 @@ async fn run(args: Args) -> anyhow::Result<u8> {
 
     let _forwards = specs.start(&client).await?;
     let agent = args.forward_agent.then_some(AgentSource::Default);
+    if args.forward_x11 {
+        match X11Forwarding::from_environment() {
+            Ok(forwarding) => client.set_x11_forwarding(forwarding),
+            Err(e) => eprintln!("warning: X11 forwarding is off: {e}"),
+        }
+    }
     if args.no_command {
         eprintln!("Forwarding; press Ctrl+C to stop.");
         tokio::select! {

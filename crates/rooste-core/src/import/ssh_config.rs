@@ -73,6 +73,9 @@ pub fn parse(text: &str, base: &Path) -> Vec<Profile> {
                 user: option("user").unwrap_or_default(),
                 key_file: option("identityfile").map(|f| expand_tilde(&f)),
                 proxy_jump: option("proxyjump").filter(|j| !j.eq_ignore_ascii_case("none")),
+                forward_agent: option("forwardagent")
+                    .is_some_and(|v| v.eq_ignore_ascii_case("yes")),
+                forward_x11: option("forwardx11").is_some_and(|v| v.eq_ignore_ascii_case("yes")),
                 notes: "Imported from ~/.ssh/config".into(),
                 ..Profile::default()
             }
@@ -267,6 +270,17 @@ Host *
         let names: Vec<_> = profiles.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["web", "db", "db-replica", "bastion"]);
         assert!(profiles.iter().all(|p| p.folder == FOLDER));
+    }
+
+    #[test]
+    fn agent_and_x11_forwarding() {
+        let config =
+            "Host gui\n  ForwardX11 yes\n  ForwardAgent yes\nHost plain\n  ForwardX11 no\n";
+        let profiles = parse(config, Path::new("/tmp"));
+        let gui = by_name(&profiles, "gui");
+        assert!(gui.forward_x11 && gui.forward_agent);
+        let plain = by_name(&profiles, "plain");
+        assert!(!plain.forward_x11 && !plain.forward_agent);
     }
 
     #[test]

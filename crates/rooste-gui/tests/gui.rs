@@ -104,7 +104,7 @@ fn settle(harness: &mut Harness<'_, RoosteApp>) {
 
 fn harness(app: RoosteApp) -> Harness<'static, RoosteApp> {
     Harness::builder()
-        .with_size([1100.0, 700.0])
+        .with_size([1100.0, 800.0])
         .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app)
 }
 
@@ -282,8 +282,7 @@ fn create_a_profile_in_the_editor() {
     settle(&mut harness);
     harness.get_by_label("New session");
 
-    harness.get_by_label("Save").click();
-    settle(&mut harness);
+    click(&mut harness, "Save");
     harness.get_by_label("Enter a host name.");
 
     type_into(&mut harness, "Name", "My server");

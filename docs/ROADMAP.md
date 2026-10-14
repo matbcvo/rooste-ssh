@@ -11,7 +11,7 @@ everything needed for daily remote work in one app.
 - Searchable session manager with folders and tags; plain TOML config with a portable mode
 - Works with existing OpenSSH setups: reads `~/.ssh/config` and `known_hosts`
 - Built-in SFTP browser, key generator and SSH agent
-- Port-forwarding UI with saved tunnels, ProxyJump
+- Port-forwarding UI with saved tunnels, ProxyJump, agent and X11 forwarding
 - Modern rendering: true color, HiDPI, font fallback, per-tab zoom
 - Keepalive, auto-reconnect, duplicate session
 - Broadcast input to several sessions, command palette
@@ -159,7 +159,7 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
 
 ### Later
 Serving Pageant's protocol from the built-in agent (Windows),
-session recordings for playback (plain-text logs are done), FIDO2 (`sk-ed25519`) keys, X11 forwarding, scripting or plugins,
+session recordings for playback (plain-text logs are done), FIDO2 (`sk-ed25519`) keys, scripting or plugins,
 macOS.
 
 ## Testing strategy

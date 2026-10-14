@@ -17,6 +17,7 @@ pub mod algorithms;
 mod forward;
 pub mod known_hosts;
 mod legacy_pem;
+pub mod x11;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -37,6 +38,7 @@ pub use agent::OPENSSH_AGENT_PIPE;
 pub use forward::{Forward, ForwardKind};
 pub use known_hosts::{HostKeyPolicy, HostKeyPrompt, HostKeyStatus, UnknownHostKey};
 pub use russh::keys::{PrivateKey, PublicKey};
+pub use x11::X11Forwarding;
 
 use crate::Transport;
 
@@ -292,7 +294,12 @@ struct ClientHandler {
     routes: Routes,
     /// Agent that forwarded agent connections are relayed to.
     agent: Arc<Mutex<Option<AgentSource>>>,
+    x11: X11State,
 }
+
+/// The local display and the fake cookie given to the server, once X11
+/// forwarding is on.
+type X11State = Arc<Mutex<Option<(X11Forwarding, Vec<u8>)>>>;
 
 impl ClientHandler {
     fn fail(&self, failure: HostKeyFailure) -> bool {
@@ -378,6 +385,27 @@ impl client::Handler for ClientHandler {
         Ok(())
     }
 
+    async fn server_channel_open_x11(
+        &mut self,
+        channel: russh::Channel<Msg>,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let Some((forwarding, fake)) = lock(&self.x11).clone() else {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        };
+        reply.accept().await;
+        tokio::spawn(async move {
+            let _ = x11::proxy(channel.into_stream(), &forwarding, &fake).await;
+        });
+        Ok(())
+    }
+
     async fn server_channel_open_agent_forward(
         &mut self,
         channel: russh::Channel<Msg>,
@@ -449,6 +477,7 @@ struct Parts {
     failure: Arc<Mutex<Option<HostKeyFailure>>>,
     routes: Routes,
     agent: Arc<Mutex<Option<AgentSource>>>,
+    x11: X11State,
 }
 
 impl Parts {
@@ -461,6 +490,7 @@ impl Parts {
             failure: self.failure.clone(),
             routes: self.routes.clone(),
             agent: self.agent.clone(),
+            x11: self.x11.clone(),
         }
     }
 
@@ -491,6 +521,7 @@ impl Parts {
             allow_legacy_algorithms: config.allow_legacy_algorithms,
             routes: self.routes,
             agent: self.agent,
+            x11: self.x11,
             remaining_methods: None,
             _via: via,
         })
@@ -528,6 +559,7 @@ pub struct SshClient {
     allow_legacy_algorithms: bool,
     routes: Routes,
     agent: Arc<Mutex<Option<AgentSource>>>,
+    x11: X11State,
     /// Login methods the server still accepts, from its last rejection.
     remaining_methods: Option<Vec<AuthMethod>>,
     /// Jump host this connection is tunneled through.
@@ -742,7 +774,26 @@ impl SshClient {
             *lock(&self.agent) = Some(source);
             channel.agent_forward(false).await?;
         }
+        let x11 = lock(&self.x11).clone();
+        if let Some((forwarding, fake)) = x11 {
+            channel
+                .request_x11(
+                    false,
+                    false,
+                    x11::COOKIE_PROTOCOL,
+                    x11::hex(&fake),
+                    forwarding.screen,
+                )
+                .await?;
+        }
         Ok(())
+    }
+
+    /// Forward X11 to `forwarding`'s display in shells and commands opened
+    /// from now on. The server gets a random cookie, never the real one.
+    pub fn set_x11_forwarding(&self, forwarding: X11Forwarding) {
+        let fake: Vec<u8> = (0..16).map(|_| rand::random::<u8>()).collect();
+        *lock(&self.x11) = Some((forwarding, fake));
     }
 
     /// Open a channel running a subsystem such as `sftp`.
