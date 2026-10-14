@@ -1,5 +1,5 @@
 # OpenSSH server used by integration tests. Test-only credentials: rooste/rooste.
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN apk add --no-cache openssh \
     && ssh-keygen -A \
