@@ -62,6 +62,7 @@ pub fn show(ui: &mut Ui, state: &mut ManagerState, profiles: &[Profile]) -> Opti
     });
     let search = ui.add(
         egui::TextEdit::singleline(&mut state.search)
+            .margin(crate::theme::FIELD_MARGIN)
             .hint_text("Search")
             .desired_width(f32::INFINITY),
     );

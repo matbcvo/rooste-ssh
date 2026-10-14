@@ -19,6 +19,29 @@ pub fn visuals(theme: Theme) -> egui::Visuals {
     }
 }
 
+/// Width of text fields in forms, including any "Browse…" button.
+pub const FIELD_WIDTH: f32 = 320.0;
+/// Space inside text fields around the text.
+pub const FIELD_MARGIN: egui::Margin = egui::Margin::symmetric(6, 4);
+/// Column and row gaps in form grids.
+pub const FORM_SPACING: [f32; 2] = [16.0, 10.0];
+
+/// Roomier spacing than egui's compact defaults.
+pub fn spacing(style: &mut egui::Style) {
+    let s = &mut style.spacing;
+    s.item_spacing = egui::vec2(8.0, 6.0);
+    s.button_padding = egui::vec2(8.0, 4.0);
+    s.interact_size.y = 24.0;
+    s.menu_margin = egui::Margin::same(8);
+    s.window_margin = egui::Margin::same(12);
+    s.menu_spacing = 4.0;
+}
+
+/// The frame of modal dialogs.
+pub fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
+    egui::Frame::popup(&ctx.global_style()).inner_margin(20)
+}
+
 pub fn apply_to_view(view: &mut TerminalView, settings: &Settings) {
     view.font_size = settings.font_size.clamp(6.0, 48.0);
     view.copy_on_select = settings.copy_on_select;
