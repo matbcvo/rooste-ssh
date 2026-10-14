@@ -37,6 +37,11 @@ pub fn spacing(style: &mut egui::Style) {
     s.menu_spacing = 4.0;
 }
 
+/// The frame of side panels (sessions, files).
+pub fn side_panel_frame(ctx: &egui::Context) -> egui::Frame {
+    egui::Frame::side_top_panel(&ctx.global_style()).inner_margin(10)
+}
+
 /// The frame of modal dialogs.
 pub fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::popup(&ctx.global_style()).inner_margin(20)
