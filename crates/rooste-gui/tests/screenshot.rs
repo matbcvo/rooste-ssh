@@ -194,8 +194,9 @@ fn render_dialogs() {
     };
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
     std::fs::create_dir_all(&out).unwrap();
-    let shots: [(&str, &[&str]); 5] = [
+    let shots: [(&str, &[&str]); 6] = [
         ("welcome", &[]),
+        ("update-banner", &[]),
         ("welcome-light", &[]),
         ("profile-editor", &["Session", "New session…"]),
         ("settings", &["Session", "Settings…"]),
@@ -206,7 +207,14 @@ fn render_dialogs() {
         if name.ends_with("-light") {
             config.settings.theme = rooste_core::Theme::Light;
         }
-        let app = RoosteApp::with_config(config, None, Arc::new(MemoryStore::default()));
+        let mut app = RoosteApp::with_config(config, None, Arc::new(MemoryStore::default()));
+        if name == "update-banner" {
+            app.update_banner = Some(rooste_gui::update::Release {
+                version: "0.2.0".into(),
+                url: "https://example.com".into(),
+                download: "https://example.com".into(),
+            });
+        }
         let mut harness = Harness::builder()
             .with_size([1000.0, 640.0])
             .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);

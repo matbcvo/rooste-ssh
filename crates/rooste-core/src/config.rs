@@ -49,6 +49,8 @@ pub struct Settings {
     pub use_builtin_agent: bool,
     /// Ask GitHub for a newer release at startup.
     pub check_updates: bool,
+    /// A release the user chose not to be told about again.
+    pub skipped_version: String,
 }
 
 impl Default for Settings {
@@ -66,6 +68,7 @@ impl Default for Settings {
             log_dir: String::new(),
             use_builtin_agent: false,
             check_updates: true,
+            skipped_version: String::new(),
         }
     }
 }

@@ -11,7 +11,10 @@ pub const RELEASES_API: &str = "https://api.github.com/repos/matbcvo/rooste-ssh/
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
     pub version: String,
+    /// The release page, with its notes and all downloads.
     pub url: String,
+    /// The file to download for this installation, or the release page.
+    pub download: String,
 }
 
 #[derive(Deserialize)]
@@ -22,6 +25,54 @@ struct GithubRelease {
     draft: bool,
     #[serde(default)]
     prerelease: bool,
+    #[serde(default)]
+    assets: Vec<Asset>,
+}
+
+#[derive(Deserialize)]
+struct Asset {
+    name: String,
+    browser_download_url: String,
+}
+
+/// How this copy was installed, which decides the file to offer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Install {
+    WindowsInstaller,
+    WindowsPortable,
+    /// Linux packages are updated through their package manager or store,
+    /// so the release page is offered.
+    Other,
+}
+
+impl Install {
+    pub fn detect() -> Self {
+        if !cfg!(windows) {
+            return Self::Other;
+        }
+        let portable = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join("portable").exists()))
+            .unwrap_or(false);
+        if portable {
+            Self::WindowsPortable
+        } else {
+            Self::WindowsInstaller
+        }
+    }
+}
+
+/// The asset to download for `install`, if the release has one.
+fn pick_download(assets: &[Asset], install: Install) -> Option<&str> {
+    let suffix = match install {
+        Install::WindowsInstaller => "-x64.msi",
+        Install::WindowsPortable => "-windows-x64-portable.zip",
+        Install::Other => return None,
+    };
+    assets
+        .iter()
+        .find(|a| a.name.ends_with(suffix))
+        .map(|a| a.browser_download_url.as_str())
 }
 
 /// `1.2.3` or `v1.2.3` (pre-release suffixes ignored).
@@ -47,7 +98,11 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
 
 /// Ask `api_url` for the latest release. `Ok(None)` means up to date, or no
 /// release published yet.
-pub fn fetch_latest(api_url: &str, current: &str) -> Result<Option<Release>, String> {
+pub fn fetch_latest(
+    api_url: &str,
+    current: &str,
+    install: Install,
+) -> Result<Option<Release>, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(10)))
         .user_agent(format!("rooste-ssh/{current}"))
@@ -73,9 +128,13 @@ pub fn fetch_latest(api_url: &str, current: &str) -> Result<Option<Release>, Str
     if release.draft || release.prerelease || !is_newer(&release.tag_name, current) {
         return Ok(None);
     }
+    let download = pick_download(&release.assets, install)
+        .unwrap_or(&release.html_url)
+        .to_owned();
     Ok(Some(Release {
         version: release.tag_name.trim_start_matches('v').to_owned(),
         url: release.html_url,
+        download,
     }))
 }
 
@@ -84,6 +143,29 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+
+    #[test]
+    fn download_for_each_installation() {
+        let asset = |name: &str| Asset {
+            name: name.into(),
+            browser_download_url: format!("https://example.com/{name}"),
+        };
+        let assets = [
+            asset("rooste-ssh-1.0.0-amd64.deb"),
+            asset("rooste-ssh-1.0.0-x64.msi"),
+            asset("rooste-ssh-1.0.0-windows-x64-portable.zip"),
+        ];
+        assert_eq!(
+            pick_download(&assets, Install::WindowsInstaller),
+            Some("https://example.com/rooste-ssh-1.0.0-x64.msi")
+        );
+        assert_eq!(
+            pick_download(&assets, Install::WindowsPortable),
+            Some("https://example.com/rooste-ssh-1.0.0-windows-x64-portable.zip")
+        );
+        assert_eq!(pick_download(&assets, Install::Other), None);
+        assert_eq!(pick_download(&[], Install::WindowsInstaller), None);
+    }
 
     #[test]
     fn versions() {
@@ -118,32 +200,40 @@ mod tests {
     #[test]
     fn reports_only_newer_published_releases() {
         let body = r#"{"tag_name":"v9.0.0","html_url":"https://example.com/r/9","draft":false,"prerelease":false}"#;
-        let found = fetch_latest(&serve_once("200 OK", body), "0.1.0").unwrap();
+        let found = fetch_latest(&serve_once("200 OK", body), "0.1.0", Install::Other).unwrap();
         assert_eq!(
             found,
             Some(Release {
                 version: "9.0.0".into(),
-                url: "https://example.com/r/9".into()
+                url: "https://example.com/r/9".into(),
+                download: "https://example.com/r/9".into(),
             })
         );
 
         let same = r#"{"tag_name":"v0.1.0","html_url":"x"}"#;
         assert_eq!(
-            fetch_latest(&serve_once("200 OK", same), "0.1.0").unwrap(),
+            fetch_latest(&serve_once("200 OK", same), "0.1.0", Install::Other).unwrap(),
             None
         );
 
         let pre = r#"{"tag_name":"v9.0.0","html_url":"x","prerelease":true}"#;
         assert_eq!(
-            fetch_latest(&serve_once("200 OK", pre), "0.1.0").unwrap(),
+            fetch_latest(&serve_once("200 OK", pre), "0.1.0", Install::Other).unwrap(),
             None
         );
 
         assert_eq!(
-            fetch_latest(&serve_once("404 Not Found", "{}"), "0.1.0").unwrap(),
+            fetch_latest(&serve_once("404 Not Found", "{}"), "0.1.0", Install::Other).unwrap(),
             None
         );
-        assert!(fetch_latest(&serve_once("500 Internal Server Error", "{}"), "0.1.0").is_err());
+        assert!(
+            fetch_latest(
+                &serve_once("500 Internal Server Error", "{}"),
+                "0.1.0",
+                Install::Other
+            )
+            .is_err()
+        );
     }
 }
 
@@ -156,6 +246,7 @@ mod network {
         let result = super::fetch_latest(
             "https://api.github.com/repos/rust-lang/rust/releases/latest",
             "0.0.1",
+            super::Install::Other,
         );
         let release = result
             .expect("HTTPS to GitHub works")
