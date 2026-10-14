@@ -84,7 +84,8 @@ jobs:
       # Throwaway account on an ephemeral runner.
       ROOSTE_TEST_SSH_ADDR: 127.0.0.1:22
       ROOSTE_TEST_SSH_USER: rooste
-      ROOSTE_TEST_SSH_PASSWORD: Rooste-Test-Pw-1!
+      # Windows rejects passwords that contain the user name.
+      ROOSTE_TEST_SSH_PASSWORD: Kq7-vTn2-Lw9-xP!
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

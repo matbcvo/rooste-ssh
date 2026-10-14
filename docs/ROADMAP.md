@@ -177,6 +177,9 @@ Windows-only code (named-pipe agent, registry import) gets Windows-only tests.
 
 - `unsafe_code = "forbid"` workspace-wide; crates that truly need unsafe opt out explicitly.
 - Key material held in zeroized memory.
+- Known issue: the `rsa` crate is affected by the Marvin timing attack (RUSTSEC-2023-0071) with no
+  fix released yet. Exposure is low for a client (local signing, once per login), so it is an
+  explicit exception in `deny.toml`; prefer Ed25519 keys. Revisit when a fixed `rsa` ships.
 - The policy lives in [crates/rooste-proto/src/ssh/algorithms.rs](../crates/rooste-proto/src/ssh/algorithms.rs).
   russh's own default also offers `ssh-rsa` (SHA-1) host keys; rooste-ssh moves it to the legacy
   tier. Never-supported algorithms are excluded at build time (the russh `dsa` and `des` features

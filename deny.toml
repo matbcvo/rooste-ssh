@@ -4,6 +4,13 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # Marvin attack: timing side channel in RSA private-key operations, no fixed
+    # `rsa` release exists. rooste-ssh only uses RSA private keys to sign a login
+    # challenge locally, once per connection; host-key checks are public-key only.
+    # Dropping RSA would lock out many users. Revisit when `rsa` ships a fix.
+    { id = "RUSTSEC-2023-0071", reason = "no fix available; local, low-volume signing only" },
+]
 
 [licenses]
 version = 2
