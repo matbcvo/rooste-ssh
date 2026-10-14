@@ -25,11 +25,15 @@ pub struct ViewOutput {
 
 /// Gap between the terminal text and the edges of its area.
 const PADDING: f32 = 6.0;
+const MIN_FONT_SIZE: f32 = 6.0;
+const MAX_FONT_SIZE: f32 = 72.0;
 
 /// Per-terminal widget state.
 #[derive(Debug)]
 pub struct TerminalView {
     pub font_size: f32,
+    /// This tab's zoom, multiplying `font_size` (1.0 = 100%).
+    pub zoom: f32,
     /// Copy the selection to the clipboard when the mouse button is released.
     pub copy_on_select: bool,
     keys: KeyTranslator,
@@ -46,6 +50,7 @@ impl Default for TerminalView {
     fn default() -> Self {
         Self {
             font_size: 14.0,
+            zoom: 1.0,
             copy_on_select: true,
             keys: KeyTranslator::default(),
             scroll_accum: 0.0,
@@ -82,7 +87,21 @@ fn color(rgb: Rgb) -> Color32 {
 
 impl TerminalView {
     fn font(&self) -> FontId {
-        FontId::monospace(self.font_size)
+        FontId::monospace((self.font_size * self.zoom).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE))
+    }
+
+    /// Make the text 10% larger.
+    pub fn zoom_in(&mut self) {
+        self.zoom = (self.zoom * 1.1).min(MAX_FONT_SIZE / self.font_size);
+    }
+
+    /// Make the text 10% smaller.
+    pub fn zoom_out(&mut self) {
+        self.zoom = (self.zoom / 1.1).max(MIN_FONT_SIZE / self.font_size);
+    }
+
+    pub fn reset_zoom(&mut self) {
+        self.zoom = 1.0;
     }
 
     /// Lay out, handle input and paint. Call once per frame.
@@ -275,6 +294,16 @@ impl TerminalView {
                         )
                     {
                         out.send.extend(bytes);
+                    }
+                }
+                // Ctrl + wheel zooms instead of scrolling.
+                Event::MouseWheel {
+                    delta, modifiers, ..
+                } if response.hovered() && modifiers.command => {
+                    if delta.y > 0.0 {
+                        self.zoom_in();
+                    } else if delta.y < 0.0 {
+                        self.zoom_out();
                     }
                 }
                 Event::MouseWheel { unit, delta, .. } if response.hovered() => {

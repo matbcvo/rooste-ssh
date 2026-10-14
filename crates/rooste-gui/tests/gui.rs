@@ -697,6 +697,42 @@ fn tab_right_click_menu_duplicates_and_closes() {
 }
 
 #[test]
+fn ctrl_plus_minus_and_zero_zoom_the_active_tab() {
+    let f = Fixture::with_server();
+    let mut harness = harness(app_with(&f, vec![f.profile("one")]));
+    context_menu(&mut harness, "one", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+    wait_for(&mut harness, "prompt", |app| screen_text(app).contains('$'));
+    let zoom = |harness: &Harness<'_, RoosteApp>| first_tab(harness.state()).unwrap().view.zoom;
+    let cols =
+        |harness: &Harness<'_, RoosteApp>| first_tab(harness.state()).unwrap().terminal.size().0;
+    let before = cols(&harness);
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Equals);
+    settle(&mut harness);
+    assert!(zoom(&harness) > 1.0);
+    assert!(cols(&harness) < before, "larger text fits fewer columns");
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Minus);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Minus);
+    settle(&mut harness);
+    assert!(zoom(&harness) < 1.0);
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num0);
+    settle(&mut harness);
+    assert_eq!(zoom(&harness), 1.0);
+    assert_eq!(cols(&harness), before);
+
+    // The zoom keys never reached the shell (Ctrl - would send ^_).
+    harness.event(egui::Event::Text("after".into()));
+    harness.key_press(egui::Key::Enter);
+    wait_for(&mut harness, "echo", |app| {
+        screen_text(app).contains("echo: after")
+    });
+    assert!(!screen_text(harness.state()).contains("echo: \u{1f}"));
+}
+
+#[test]
 fn split_right_opens_a_second_session_beside_the_first() {
     let f = Fixture::with_server();
     let mut harness = harness(app_with(&f, vec![f.profile("one")]));

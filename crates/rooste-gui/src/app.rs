@@ -727,6 +727,17 @@ impl RoosteApp {
             Command::SplitDown => self.split_active(LinearDir::Vertical),
             Command::ToggleBroadcast => self.toggle_broadcast(),
             Command::ToggleSessionManager => self.show_manager = !self.show_manager,
+            Command::ZoomIn | Command::ZoomOut | Command::ResetZoom => {
+                if let Some(id) = self.active_tab_id()
+                    && let Some(tab) = self.tab_mut(id)
+                {
+                    match command {
+                        Command::ZoomIn => tab.view.zoom_in(),
+                        Command::ZoomOut => tab.view.zoom_out(),
+                        _ => tab.view.reset_zoom(),
+                    }
+                }
+            }
             Command::CloseTab => {
                 if let Some(id) = self.active_tab_id() {
                     self.request_close(id);
@@ -816,6 +827,8 @@ impl RoosteApp {
     pub fn show(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         self.picker.poll();
+        // Before the terminal reads keys, so zoom keys don't reach the shell.
+        self.zoom_shortcuts(&ctx);
         if self.applied_theme != Some(self.config.settings.theme) {
             ctx.set_visuals(theme::visuals(self.config.settings.theme));
             ctx.all_styles_mut(theme::spacing);
@@ -1034,6 +1047,19 @@ impl RoosteApp {
                             query: String::new(),
                         });
                         ui.close();
+                    }
+                    ui.separator();
+                    let has_tab = self.active_tab_id().is_some();
+                    for (label, shortcut, command) in [
+                        ("Zoom in", "Ctrl +", Command::ZoomIn),
+                        ("Zoom out", "Ctrl −", Command::ZoomOut),
+                        ("Reset zoom", "Ctrl 0", Command::ResetZoom),
+                    ] {
+                        let button = egui::Button::new(label).shortcut_text(shortcut);
+                        if ui.add_enabled(has_tab, button).clicked() {
+                            self.run_command(&ctx, command);
+                            ui.close();
+                        }
                     }
                 });
             });
@@ -1307,6 +1333,26 @@ impl RoosteApp {
         {
             self.request_close(id);
         }
+    }
+
+    /// Ctrl + / Ctrl - / Ctrl 0 zoom the active tab's text.
+    fn zoom_shortcuts(&mut self, ctx: &egui::Context) {
+        use egui::{Key, KeyboardShortcut, Modifiers};
+        // egui would zoom the whole interface on these keys.
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        let pressed = |key| {
+            ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, key)))
+        };
+        let command = if pressed(Key::Plus) || pressed(Key::Equals) {
+            Command::ZoomIn
+        } else if pressed(Key::Minus) {
+            Command::ZoomOut
+        } else if pressed(Key::Num0) {
+            Command::ResetZoom
+        } else {
+            return;
+        };
+        self.run_command(ctx, command);
     }
 
     fn update_window_title(&mut self, ctx: &egui::Context) {

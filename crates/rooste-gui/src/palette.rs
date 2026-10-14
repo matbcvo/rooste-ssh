@@ -20,6 +20,9 @@ pub enum Command {
     SplitDown,
     ToggleBroadcast,
     ToggleSessionManager,
+    ZoomIn,
+    ZoomOut,
+    ResetZoom,
     CloseTab,
 }
 
@@ -55,6 +58,9 @@ pub fn commands(profiles: &[Profile], has_tab: bool) -> Vec<(String, Command)> {
             ("Duplicate tab".to_owned(), Command::DuplicateTab),
             ("Split right".to_owned(), Command::SplitRight),
             ("Split down".to_owned(), Command::SplitDown),
+            ("Zoom in".to_owned(), Command::ZoomIn),
+            ("Zoom out".to_owned(), Command::ZoomOut),
+            ("Reset zoom".to_owned(), Command::ResetZoom),
             (
                 "Toggle broadcast input".to_owned(),
                 Command::ToggleBroadcast,

@@ -12,7 +12,7 @@ everything needed for daily remote work in one app.
 - Works with existing OpenSSH setups: reads `~/.ssh/config` and `known_hosts`
 - Built-in SFTP browser, key generator and SSH agent
 - Port-forwarding UI with saved tunnels, ProxyJump
-- Modern rendering: true color, HiDPI, font fallback, optional ligatures
+- Modern rendering: true color, HiDPI, font fallback, per-tab zoom
 - Keepalive, auto-reconnect, duplicate session
 - Broadcast input to several sessions, command palette
 
