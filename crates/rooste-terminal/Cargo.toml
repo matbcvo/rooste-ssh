@@ -1,13 +1,16 @@
 [package]
 name = "rooste-terminal"
-description = "Terminal emulation: input encoding, selection and scrollback"
+description = "Internal crate of Rooste SSH: terminal emulation, input encoding and search. Not a stable API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-publish = false
+homepage.workspace = true
+readme = "../../README.md"
+keywords = ["terminal", "emulator", "ansi"]
+categories = ["command-line-interface"]
 
 [dependencies]
 alacritty_terminal.workspace = true

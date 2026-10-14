@@ -4466,32 +4466,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rooste-gui"
-version = "0.2.0"
-dependencies = [
- "arboard",
- "chrono",
- "eframe",
- "egui",
- "egui_kittest",
- "egui_tiles",
- "futures",
- "keyring",
- "rfd",
- "rooste-core",
- "rooste-keys",
- "rooste-protocols",
- "rooste-sftp",
- "rooste-terminal",
- "rooste-testkit",
- "russh",
- "serde",
- "tempfile",
- "tokio",
- "ureq",
-]
-
-[[package]]
 name = "rooste-keys"
 version = "0.2.0"
 dependencies = [
@@ -4541,6 +4515,32 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "rooste-ssh"
+version = "0.2.0"
+dependencies = [
+ "arboard",
+ "chrono",
+ "eframe",
+ "egui",
+ "egui_kittest",
+ "egui_tiles",
+ "futures",
+ "keyring",
+ "rfd",
+ "rooste-core",
+ "rooste-keys",
+ "rooste-protocols",
+ "rooste-sftp",
+ "rooste-terminal",
+ "rooste-testkit",
+ "russh",
+ "serde",
+ "tempfile",
+ "tokio",
+ "ureq",
 ]
 
 [[package]]

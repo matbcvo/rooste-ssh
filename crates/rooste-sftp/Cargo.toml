@@ -1,13 +1,16 @@
 [package]
 name = "rooste-sftp"
-description = "SFTP operations and transfer queue"
+description = "Internal crate of Rooste SSH: SFTP listing and transfers. Not a stable API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-publish = false
+homepage.workspace = true
+readme = "../../README.md"
+keywords = ["ssh", "sftp"]
+categories = ["network-programming"]
 
 [dependencies]
 rooste-protocols.workspace = true

@@ -2,10 +2,10 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use rooste_gui::RoosteApp;
+use rooste_ssh::RoosteApp;
 
 /// 64x64 RGBA window icon (generated from `packaging/icons`).
-const ICON: &[u8] = include_bytes!("../../../packaging/icons/icon-64.rgba");
+const ICON: &[u8] = include_bytes!("../assets/icon-64.rgba");
 
 fn main() -> eframe::Result {
     if std::env::args().any(|a| a == "--version" || a == "-V") {
@@ -29,7 +29,7 @@ fn main() -> eframe::Result {
         "rooste-ssh",
         options,
         Box::new(|cc| {
-            rooste_gui::fonts::install(&cc.egui_ctx);
+            rooste_ssh::fonts::install(&cc.egui_ctx);
             Ok(Box::new(
                 RoosteApp::new()
                     .with_context(cc.egui_ctx.clone())

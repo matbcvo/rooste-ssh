@@ -8,7 +8,7 @@ please open an issue first so we can agree on the approach.
 Requires Rust 1.95 or newer.
 
 ```sh
-cargo run -p rooste-gui              # desktop app (binary: rooste)
+cargo run -p rooste-ssh              # desktop app (binary: rooste)
 cargo run -p rooste-cli -- user@host # command-line client
 ```
 
@@ -32,7 +32,7 @@ The screenshot tests render the app to `target/screenshots/` for a visual check 
 wgpu adapter; a software Vulkan driver is enough):
 
 ```sh
-cargo test -p rooste-gui --test screenshot -- --ignored
+cargo test -p rooste-ssh --test screenshot -- --ignored
 ```
 
 ## Before opening a pull request
@@ -61,7 +61,7 @@ cargo deny check
 | `rooste-terminal` | Terminal emulation (`alacritty_terminal`), input encoding, search |
 | `rooste-keys` | Key generation, `.ppk` import and export, the built-in agent |
 | `rooste-sftp` | SFTP over an SSH connection: listing, transfers with progress |
-| `rooste-gui` | Desktop application (egui) |
+| `rooste-ssh` | Desktop application (egui) |
 | `rooste-cli` | Command-line client, also used in tests and release smoke tests |
 | `rooste-testkit` | Shared test fixtures: SSH, telnet and agent test servers |
 

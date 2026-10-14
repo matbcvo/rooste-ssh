@@ -1,13 +1,16 @@
 [package]
 name = "rooste-core"
-description = "Session/profile model, configuration, ssh_config and session import"
+description = "Internal crate of Rooste SSH: session profiles, configuration and imports. Not a stable API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-publish = false
+homepage.workspace = true
+readme = "../../README.md"
+keywords = ["ssh", "config"]
+categories = ["config"]
 
 [dependencies]
 serde.workspace = true

@@ -1,13 +1,16 @@
 [package]
 name = "rooste-protocols"
-description = "Transport abstraction implemented by SSH, serial, telnet and raw connections"
+description = "Internal crate of Rooste SSH: SSH, telnet, raw TCP and serial transports. Not a stable API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-publish = false
+homepage.workspace = true
+readme = "../../README.md"
+keywords = ["ssh", "telnet", "serial", "terminal"]
+categories = ["network-programming"]
 
 [dependencies]
 aes.workspace = true
