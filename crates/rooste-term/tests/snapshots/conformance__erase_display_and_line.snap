@@ -1,0 +1,6 @@
+---
+source: crates/rooste-term/tests/conformance.rs
+expression: "screen(8, 4, &input)"
+---
+aaa
+    bbbb

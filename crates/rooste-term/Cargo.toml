@@ -9,5 +9,11 @@ repository.workspace = true
 authors.workspace = true
 publish = false
 
+[dependencies]
+alacritty_terminal.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
 [lints]
 workspace = true

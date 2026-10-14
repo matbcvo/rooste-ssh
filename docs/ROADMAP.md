@@ -31,7 +31,7 @@ agent on Windows.
 | Legacy algorithms | Modern defaults; a small legacy set can be enabled **per session only** (see [Security](#security)) |
 | Platforms | Linux and Windows. macOS may come for free later |
 | License | MIT |
-| MSRV | Rust 1.89 (edition 2024; required by russh) |
+| MSRV | Rust 1.95 (edition 2024; required by eframe) |
 
 ## Technology
 
@@ -85,12 +85,18 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
 - In-process `russh` test server in `rooste-testkit`; Windows OpenSSH Server CI job.
 - **Tests required:** password, key and agent login; host-key mismatch; resize — on both OSes.
 
-### M2 — Terminal widget (hardest part)
+### M2 — Terminal widget ✅
 - Render the `alacritty_terminal` grid in egui.
 - Keyboard mapping including Windows AltGr and IME; mouse reporting; selection and clipboard;
   scrollback; resize propagation.
+- Box-drawing and block characters are drawn as shapes so lines join across cells; CJK and symbol
+  fallback fonts are loaded from the system.
+- Clipboard: select to copy (PuTTY style), Ctrl+C copies when text is selected, otherwise sends
+  `^C`; Ctrl+Shift+C/V, right or middle click to paste; bracketed paste.
 - **Tests required:** `insta` snapshot tests of the grid; regression suite from `vttest`/`esctest`
-  cases; manual check with `htop`, `vim`, `tmux`.
+  cases; manual check with full-screen programs. Done: conformance suite in
+  `crates/rooste-term/tests`, kittest GUI tests, and an opt-in screenshot test
+  (`cargo test -p rooste-gui --test screenshot -- --ignored`).
 
 ### M3 — First usable app (MVP)
 - Session manager with saved profiles.

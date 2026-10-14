@@ -39,7 +39,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        toolchain: [stable, "1.89"] # keep in sync with rust-version in Cargo.toml
+        toolchain: [stable, "1.95"] # keep in sync with rust-version in Cargo.toml
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -70,7 +70,7 @@ jobs:
             nc -z 127.0.0.1 2222 && break
             sleep 1
           done
-      - run: cargo nextest run --workspace --profile ci --run-ignored only
+      - run: cargo nextest run --workspace --profile ci --run-ignored only -E 'not binary(screenshot)'
         env:
           ROOSTE_TEST_SSH_ADDR: 127.0.0.1:2222
       - name: OpenSSH logs
@@ -108,7 +108,7 @@ jobs:
           Copy-Item crates/rooste-testkit/docker/openssh/authorized_keys $keys
           icacls $keys /inheritance:r /grant "*S-1-5-32-544:F" /grant "SYSTEM:F"
           Restart-Service sshd
-      - run: cargo nextest run --workspace --profile ci --run-ignored only
+      - run: cargo nextest run --workspace --profile ci --run-ignored only -E 'not binary(screenshot)'
       - name: OpenSSH logs
         if: failure()
         shell: pwsh
