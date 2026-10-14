@@ -952,9 +952,16 @@ impl RoosteApp {
 
     fn handle_manager(&mut self, ctx: &egui::Context, action: ManagerAction) {
         match action {
-            ManagerAction::New => {
+            ManagerAction::QuickConnect => self.dialog = Some(Dialog::QuickConnect),
+            ManagerAction::Import { putty } => self.import(putty),
+            ManagerAction::New | ManagerAction::NewInFolder(_) => {
+                let folder = match action {
+                    ManagerAction::NewInFolder(folder) => folder,
+                    _ => String::new(),
+                };
                 let profile = Profile {
                     user: self.config.settings.default_user.clone(),
+                    folder,
                     ..Profile::default()
                 };
                 self.serial_ports = rooste_protocols::serial::available_ports();
@@ -1299,7 +1306,18 @@ impl RoosteApp {
             ui.horizontal(|ui| {
                 ui.add_space(indent);
                 ui.vertical(|ui| {
-                    if self.quick_form(ui) {
+                    let mut submit = self.quick_form(ui);
+                    ui.add_space(8.0);
+                    // Centered under the form.
+                    let width = ui.min_rect().width();
+                    let size = egui::vec2(width, 36.0);
+                    let layout = egui::Layout::top_down(egui::Align::Center);
+                    ui.allocate_ui_with_layout(size, layout, |ui| {
+                        let connect =
+                            egui::Button::new("Connect").min_size(egui::vec2(140.0, 32.0));
+                        submit |= ui.add(connect).clicked();
+                    });
+                    if submit {
                         self.quick_connect(&ctx);
                     }
                 });
@@ -1307,7 +1325,8 @@ impl RoosteApp {
         });
     }
 
-    /// The quick-connect fields. Returns true when the user submits.
+    /// The quick-connect fields. Returns true when the user presses Enter in
+    /// one; the caller adds the Connect button.
     fn quick_form(&mut self, ui: &mut Ui) -> bool {
         let mut submit = false;
         egui::Grid::new("quick-connect")
@@ -1349,7 +1368,7 @@ impl RoosteApp {
         if let Some(error) = &self.quick_error {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
-        submit | ui.button("Connect").clicked()
+        submit
     }
 
     fn dialogs(&mut self, ctx: &egui::Context) {
@@ -1497,10 +1516,13 @@ impl RoosteApp {
                     .show(ctx, |ui| {
                         ui.heading("Quick connect");
                         ui.add_space(10.0);
-                        if self.quick_form(ui) && self.quick_connect(ctx) {
-                            keep = false;
-                        }
-                        if ui.button("Cancel").clicked() {
+                        let mut submit = self.quick_form(ui);
+                        let mut cancel = false;
+                        crate::dialogs::footer(ui, |ui| {
+                            cancel = ui.button("Cancel").clicked();
+                            submit |= ui.button("Connect").clicked();
+                        });
+                        if cancel || (submit && self.quick_connect(ctx)) {
                             keep = false;
                         }
                     });
