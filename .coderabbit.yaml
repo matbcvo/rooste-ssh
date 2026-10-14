@@ -1,0 +1,94 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit reviews pull requests from contributors. Its comments are
+# suggestions; the maintainer's review decides what gets merged. To get a
+# review on a PR it skips, comment `@coderabbitai review`.
+
+language: en-US
+
+reviews:
+  profile: chill
+  high_level_summary: true
+  # Keep the walkthrough short.
+  poem: false
+  in_progress_fortune: false
+  sequence_diagrams: false
+  suggested_labels: false
+  suggested_reviewers: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+    # Dependabot updates are checked by CI and cargo-deny; the maintainer's
+    # own PRs can ask for a review with a comment.
+    ignore_usernames:
+      - "dependabot[bot]"
+      - "matbcvo"
+
+  path_filters:
+    - "!Cargo.lock"
+    - "!fuzz/Cargo.lock"
+    - "!docs/images/**"
+    - "!**/*.png"
+    - "!crates/rooste-terminal/tests/snapshots/**"
+    # Test keys, made for the tests only.
+    - "!crates/rooste-testkit/keys/**"
+    - "!crates/rooste-protocols/tests/fixtures/**"
+
+  path_instructions:
+    - path: "**/*.rs"
+      instructions: |
+        Rust 2024, MSRV 1.95. Unsafe code is forbidden in the whole workspace;
+        flag any `unsafe`, or attempts to work around the lint. CI already runs
+        rustfmt, clippy with -D warnings and cargo-deny, so don't comment on
+        formatting or on what clippy catches. Focus on correctness, error
+        handling (no `unwrap` on input from the network, files or users), and
+        clear names. New behavior needs tests: protocol code against the
+        in-process test server in rooste-testkit, UI changes with an
+        egui_kittest test in crates/rooste-gui/tests/gui.rs.
+    - path: "crates/rooste-protocols/**"
+      instructions: |
+        Security-sensitive: SSH connections, host-key checking, authentication,
+        and port, agent and X11 forwarding. Check that host keys are never
+        accepted without the configured policy, that credentials and key
+        material are not logged or kept longer than needed (Zeroizing),
+        that legacy algorithms are only offered when enabled for a session,
+        and that forwarded channels can't be opened to targets the user did
+        not configure.
+    - path: "crates/rooste-keys/**"
+      instructions: |
+        Key generation, .ppk import/export and the built-in SSH agent. Check
+        key material handling (no logging, zeroized buffers), private key
+        files written with owner-only permissions, and correct parsing of
+        untrusted key files without panics.
+    - path: "crates/rooste-gui/**"
+      instructions: |
+        egui desktop app. Widget IDs must be stable (egui_tiles moves panes in
+        memory, so never derive IDs from addresses). Long work (network, file
+        dialogs, file I/O on big files) must not block the UI thread. Saved
+        passwords belong in the system keyring, never in config.toml.
+    - path: "crates/rooste-terminal/**"
+      instructions: |
+        Terminal emulation on alacritty_terminal and input encoding. Check
+        escape sequences and key encodings against xterm behavior, and that
+        untrusted terminal output can't cause panics or unbounded memory use.
+    - path: ".github/workflows/**"
+      instructions: |
+        CI and release workflows. Check that secrets are only used where needed,
+        that permissions are minimal, that third-party actions are from trusted
+        publishers, and that nothing from pull requests runs with write access
+        or secrets.
+    - path: "**/*.md"
+      instructions: |
+        User-facing documentation. Keep it accurate to what the code does and
+        plain-spoken. Don't present Rooste SSH as a clone or replacement of
+        another program; mentioning imports from other tools is fine.
+
+chat:
+  art: false
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CONTRIBUTING.md"
