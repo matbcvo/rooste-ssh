@@ -727,6 +727,13 @@ impl RoosteApp {
             Command::SplitDown => self.split_active(LinearDir::Vertical),
             Command::ToggleBroadcast => self.toggle_broadcast(),
             Command::ToggleSessionManager => self.show_manager = !self.show_manager,
+            Command::Find => {
+                if let Some(id) = self.active_tab_id()
+                    && let Some(tab) = self.tab_mut(id)
+                {
+                    tab.open_find();
+                }
+            }
             Command::ZoomIn | Command::ZoomOut | Command::ResetZoom => {
                 if let Some(id) = self.active_tab_id()
                     && let Some(tab) = self.tab_mut(id)
@@ -827,8 +834,8 @@ impl RoosteApp {
     pub fn show(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         self.picker.poll();
-        // Before the terminal reads keys, so zoom keys don't reach the shell.
-        self.zoom_shortcuts(&ctx);
+        // Before the terminal reads keys, so these keys don't reach the shell.
+        self.terminal_shortcuts(&ctx);
         if self.applied_theme != Some(self.config.settings.theme) {
             ctx.set_visuals(theme::visuals(self.config.settings.theme));
             ctx.all_styles_mut(theme::spacing);
@@ -991,6 +998,16 @@ impl RoosteApp {
                 });
                 ui.menu_button("Tab", |ui| {
                     let has_tab = self.active_tab_id().is_some();
+                    if ui
+                        .add_enabled(
+                            has_tab,
+                            egui::Button::new("Find…").shortcut_text("Ctrl+Shift+F"),
+                        )
+                        .clicked()
+                    {
+                        self.run_command(&ctx, Command::Find);
+                        ui.close();
+                    }
                     for (label, command) in [
                         ("Files (SFTP)", Command::ToggleFiles),
                         ("Duplicate tab", Command::DuplicateTab),
@@ -1335,14 +1352,19 @@ impl RoosteApp {
         }
     }
 
-    /// Ctrl + / Ctrl - / Ctrl 0 zoom the active tab's text.
-    fn zoom_shortcuts(&mut self, ctx: &egui::Context) {
+    /// Shortcuts the terminal would otherwise take as input: Ctrl + / Ctrl -
+    /// / Ctrl 0 zoom the active tab's text, Ctrl+Shift+F finds in it.
+    fn terminal_shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, KeyboardShortcut, Modifiers};
         // egui would zoom the whole interface on these keys.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let pressed = |key| {
             ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, key)))
         };
+        let find = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::F);
+        if ctx.input_mut(|i| i.consume_shortcut(&find)) {
+            self.run_command(ctx, Command::Find);
+        }
         let command = if pressed(Key::Plus) || pressed(Key::Equals) {
             Command::ZoomIn
         } else if pressed(Key::Minus) {

@@ -733,6 +733,68 @@ fn ctrl_plus_minus_and_zero_zoom_the_active_tab() {
 }
 
 #[test]
+fn find_bar_searches_the_terminal_output() {
+    let f = Fixture::with_server();
+    let mut harness = harness(app_with(&f, vec![f.profile("one")]));
+    context_menu(&mut harness, "one", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+    wait_for(&mut harness, "prompt", |app| screen_text(app).contains('$'));
+    for word in ["alpha", "beta", "alpha again"] {
+        harness.event(egui::Event::Text(word.into()));
+        harness.key_press(egui::Key::Enter);
+        settle(&mut harness);
+    }
+    wait_for(&mut harness, "output", |app| {
+        screen_text(app).contains("echo: alpha again")
+    });
+    let selected = |harness: &Harness<'_, RoosteApp>| {
+        first_tab(harness.state())
+            .unwrap()
+            .terminal
+            .selection_text()
+    };
+
+    // Ctrl+Shift+F opens the bar; typing finds the newest match.
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::F,
+    );
+    settle(&mut harness);
+    last(&harness, "Find").type_text("echo: alpha");
+    settle(&mut harness);
+    assert_eq!(selected(&harness).as_deref(), Some("echo: alpha"));
+
+    // Enter goes to the older match, and the bar keeps focus.
+    harness.key_press(egui::Key::Enter);
+    settle(&mut harness);
+    assert_eq!(selected(&harness).as_deref(), Some("echo: alpha"));
+    assert!(
+        harness
+            .state()
+            .tabs()
+            .next()
+            .unwrap()
+            .find
+            .as_ref()
+            .unwrap()
+            .found
+            == Some(true)
+    );
+
+    // Text that isn't there says so.
+    last(&harness, "Find").type_text("zzz");
+    settle(&mut harness);
+    harness.get_by_label("Not found");
+    assert_eq!(selected(&harness), None);
+
+    // Esc closes the bar.
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+    assert!(first_tab(harness.state()).unwrap().find.is_none());
+    assert!(harness.query_by_label("Not found").is_none());
+}
+
+#[test]
 fn split_right_opens_a_second_session_beside_the_first() {
     let f = Fixture::with_server();
     let mut harness = harness(app_with(&f, vec![f.profile("one")]));

@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::search::{Match, RegexSearch};
 use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{self, Color, NamedColor, Processor};
 
@@ -172,11 +173,20 @@ impl Dimensions for Size {
     }
 }
 
+/// Which way to look for the next match: up into older output, or down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchDirection {
+    Up,
+    Down,
+}
+
 /// A terminal emulator: feed it output, render its [`Screen`].
 pub struct Terminal {
     term: Term<Listener>,
     parser: Processor,
     listener: Listener,
+    /// The last search match, where the next search continues from.
+    found: Option<Match>,
 }
 
 impl std::fmt::Debug for Terminal {
@@ -213,6 +223,7 @@ impl Terminal {
             term: Term::new(config, &Size { cols, rows }, listener.clone()),
             parser: Processor::new(),
             listener,
+            found: None,
         }
     }
 
@@ -369,6 +380,60 @@ impl Terminal {
         self.term.selection = None;
     }
 
+    /// Find `text` in the screen and scrollback (ignoring case unless it
+    /// has capitals), continuing from the last match and wrapping around.
+    /// The match is selected and scrolled into view. Returns false if
+    /// there is none.
+    pub fn find(&mut self, text: &str, direction: SearchDirection) -> bool {
+        let Ok(mut regex) = RegexSearch::new(&escape_regex(text)) else {
+            return false;
+        };
+        let (dir, origin) = match (direction, &self.found) {
+            (SearchDirection::Up, Some(found)) => (
+                Direction::Left,
+                found.start().sub(&self.term, Boundary::None, 1),
+            ),
+            (SearchDirection::Down, Some(found)) => (
+                Direction::Right,
+                found.end().add(&self.term, Boundary::None, 1),
+            ),
+            // Start below the last line, so the newest match comes first.
+            (SearchDirection::Up, None) => (
+                Direction::Left,
+                Point::new(
+                    Line(self.term.screen_lines() as i32 - 1),
+                    Column(self.term.columns() - 1),
+                ),
+            ),
+            (SearchDirection::Down, None) => (
+                Direction::Right,
+                Point::new(Line(-(self.history_size() as i32)), Column(0)),
+            ),
+        };
+        let side = match dir {
+            Direction::Left => Side::Right,
+            Direction::Right => Side::Left,
+        };
+        let Some(found) = self.term.search_next(&mut regex, origin, dir, side, None) else {
+            self.clear_search();
+            return false;
+        };
+        let mut selection = Selection::new(SelectionType::Simple, *found.start(), Side::Left);
+        selection.update(*found.end(), Side::Right);
+        self.term.selection = Some(selection);
+        self.term.scroll_to_point(*found.start());
+        self.found = Some(found);
+        true
+    }
+
+    /// Forget the search position and its selection. The next
+    /// [`Self::find`] starts from the bottom (or top) again.
+    pub fn clear_search(&mut self) {
+        if self.found.take().is_some() {
+            self.term.selection = None;
+        }
+    }
+
     /// Selected text, or `None` if nothing is selected.
     pub fn selection_text(&self) -> Option<String> {
         self.term
@@ -513,4 +578,16 @@ fn window_size(cols: usize, rows: usize, cell_width: u16, cell_height: u16) -> W
         cell_width,
         cell_height,
     }
+}
+
+/// `text` as a regex matching it literally.
+fn escape_regex(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if "\\.+*?()|[]{}^$#&-~".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }

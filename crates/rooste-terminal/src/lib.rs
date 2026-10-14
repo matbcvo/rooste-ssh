@@ -10,5 +10,6 @@ mod terminal;
 
 pub use palette::{Palette, Rgb};
 pub use terminal::{
-    CursorShape, MouseMode, MouseReport, Screen, ScreenCell, SelectionKind, TermEvent, Terminal,
+    CursorShape, MouseMode, MouseReport, Screen, ScreenCell, SearchDirection, SelectionKind,
+    TermEvent, Terminal,
 };
