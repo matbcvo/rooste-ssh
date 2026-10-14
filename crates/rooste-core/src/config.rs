@@ -36,6 +36,8 @@ pub struct Settings {
     pub confirm_close: bool,
     /// User name used when a profile leaves it empty.
     pub default_user: String,
+    /// Reconnect automatically when a connection drops.
+    pub auto_reconnect: bool,
 }
 
 impl Default for Settings {
@@ -47,6 +49,7 @@ impl Default for Settings {
             theme: Theme::Dark,
             confirm_close: true,
             default_user: String::new(),
+            auto_reconnect: true,
         }
     }
 }

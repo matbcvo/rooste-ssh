@@ -46,3 +46,43 @@ pub(crate) async fn connect(source: &AgentSource) -> Result<DynAgent, keys::Erro
     }
     Ok(AgentClient::connect_pageant().await?.dynamic())
 }
+
+/// A byte stream to an agent, for relaying forwarded agent connections.
+pub(crate) trait AgentByteStream:
+    tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
+{
+}
+
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> AgentByteStream for T {}
+
+#[cfg(unix)]
+pub(crate) async fn connect_stream(
+    source: &AgentSource,
+) -> std::io::Result<Box<dyn AgentByteStream>> {
+    let path = match source {
+        AgentSource::Path(path) => path.clone(),
+        AgentSource::Default => std::env::var_os("SSH_AUTH_SOCK")
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "SSH_AUTH_SOCK is not set")
+            })?,
+    };
+    Ok(Box::new(tokio::net::UnixStream::connect(path).await?))
+}
+
+#[cfg(windows)]
+pub(crate) async fn connect_stream(
+    source: &AgentSource,
+) -> std::io::Result<Box<dyn AgentByteStream>> {
+    use tokio::net::windows::named_pipe::ClientOptions;
+
+    let open = |pipe: &std::ffi::OsStr| ClientOptions::new().open(pipe);
+    let client = match source {
+        AgentSource::Path(path) => open(path.as_os_str())?,
+        AgentSource::Default => match std::env::var_os("SSH_AUTH_SOCK") {
+            Some(sock) => open(&sock).or_else(|_| open(OPENSSH_AGENT_PIPE.as_ref()))?,
+            None => open(OPENSSH_AGENT_PIPE.as_ref())?,
+        },
+    };
+    Ok(Box::new(client))
+}

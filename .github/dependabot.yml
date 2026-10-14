@@ -12,6 +12,9 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: docker
-    directory: /crates/rooste-testkit/docker/openssh
+    directories:
+      - /crates/rooste-testkit/docker/openssh
+      - /crates/rooste-testkit/docker/dropbear
+      - /crates/rooste-testkit/docker/legacy
     schedule:
       interval: weekly

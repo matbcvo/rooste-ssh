@@ -152,3 +152,88 @@ async fn pty_shell_resize_and_exit_status() {
     read_to_end(&mut shell).await;
     assert_eq!(shell.exit_status(), Some(7));
 }
+
+#[tokio::test]
+#[ignore = "requires an OpenSSH server"]
+async fn jump_host_to_itself() {
+    let fixture = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let jump = login(&Auth::PublicKey(Arc::new(private_key("id_ed25519")))).await;
+    // From the server's point of view, it is reachable on its own port 22.
+    let mut target = SshConfig::new("127.0.0.1", 22);
+    target.known_hosts = dir.path().join("known_hosts");
+    target.host_key_policy = HostKeyPolicy::AcceptNew;
+    let mut client = rooste_proto::ssh::connect_via(jump, &target)
+        .await
+        .expect("via jump");
+    assert!(
+        client
+            .authenticate(&fixture.user, &Auth::password(fixture.password.clone()))
+            .await
+            .unwrap()
+    );
+    assert_echo(&client).await;
+}
+
+#[tokio::test]
+#[ignore = "requires an OpenSSH server"]
+async fn local_forward_to_the_servers_own_sshd() {
+    use tokio::io::AsyncBufReadExt;
+    let client = login(&Auth::PublicKey(Arc::new(private_key("id_ed25519")))).await;
+    let forward = client
+        .forward_local("127.0.0.1:0", "127.0.0.1", 22)
+        .await
+        .unwrap();
+    let stream = tokio::net::TcpStream::connect(forward.listen)
+        .await
+        .unwrap();
+    let mut line = String::new();
+    tokio::io::BufReader::new(stream)
+        .read_line(&mut line)
+        .await
+        .unwrap();
+    assert!(line.starts_with("SSH-2.0-OpenSSH"), "{line:?}");
+}
+
+/// Uses `nc` on the server, so only against the Linux (Docker) server.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires an OpenSSH server"]
+async fn remote_forward_back_to_a_local_echo_server() {
+    let echo = rooste_testkit::EchoServer::start().await;
+    let client = login(&Auth::PublicKey(Arc::new(private_key("id_ed25519")))).await;
+    let forward = client
+        .forward_remote("127.0.0.1", 0, "127.0.0.1", echo.addr.port())
+        .await
+        .unwrap();
+    let out = client
+        .exec(&format!(
+            "echo ping | nc -w 2 127.0.0.1 {}",
+            forward.listen.port()
+        ))
+        .await
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ping");
+}
+
+/// Uses `ssh-add` on the server, so only against the Linux (Docker) server.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires an OpenSSH server"]
+async fn agent_forwarding_is_visible_to_ssh_add() {
+    let agent = TestAgent::start().await;
+    let client = login(&Auth::PublicKey(Arc::new(private_key("id_ed25519")))).await;
+    let out = client
+        .exec_with(
+            "ssh-add -l",
+            Some(AgentSource::Path(agent.path().to_owned())),
+        )
+        .await
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("ED25519"),
+        "{text:?} {:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

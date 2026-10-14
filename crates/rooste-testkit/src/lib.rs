@@ -7,11 +7,12 @@
 //!   Start it locally with:
 //!
 //! ```text
-//! docker build -t rooste-openssh crates/rooste-testkit/docker/openssh
+//! docker build -t rooste-openssh -f crates/rooste-testkit/docker/openssh/Dockerfile crates/rooste-testkit/docker
 //! docker run -d --rm -p 2222:22 --name rooste-openssh rooste-openssh
 //! ```
 
 mod agent;
+mod echo;
 mod server;
 
 use std::io::{self, BufRead, BufReader};
@@ -22,6 +23,7 @@ use std::time::Duration;
 use russh::keys::{PrivateKey, PublicKey};
 
 pub use agent::TestAgent;
+pub use echo::EchoServer;
 pub use server::TestServer;
 
 /// Credentials accepted by [`TestServer`] and the Docker fixture. Test-only.

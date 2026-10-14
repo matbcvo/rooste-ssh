@@ -13,7 +13,12 @@ publish = false
 alacritty_terminal.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 insta.workspace = true
+
+[[bench]]
+name = "throughput"
+harness = false
 
 [lints]
 workspace = true

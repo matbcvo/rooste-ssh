@@ -6,17 +6,23 @@
 //! - `exit N` exits with status `N`
 //! - anything else is echoed back as `echo: <line>`
 //!
-//! `exec` supports `echo <text>` and `exit N`.
+//! - `agent-keys` lists the keys of the client's forwarded SSH agent
+//!
+//! `exec` supports `echo <text>`, `exit N` and `agent-keys`.
+//!
+//! The server also accepts `direct-tcpip` channels (local and dynamic
+//! forwarding) and `tcpip-forward` requests (remote forwarding).
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use russh::keys::PublicKey;
+use russh::keys::agent::client::AgentClient;
 use russh::server::{self, Auth, ChannelOpenHandle, Msg, Session};
-use russh::{Channel, ChannelId, Preferred, Pty};
-use tokio::net::TcpListener;
+use russh::{Channel, ChannelId, ChannelOpenFailure, Preferred, Pty};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 
 use crate::{TEST_PASSWORD, TEST_USER, private_key, public_key};
@@ -27,6 +33,7 @@ pub struct TestServer {
     pub addr: SocketAddr,
     pub host_key: PublicKey,
     task: JoinHandle<()>,
+    sessions: Arc<Mutex<Vec<server::Handle>>>,
 }
 
 impl TestServer {
@@ -54,6 +61,8 @@ impl TestServer {
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
+        let sessions: Arc<Mutex<Vec<server::Handle>>> = Arc::default();
+        let tracked = sessions.clone();
         let task = tokio::spawn(async move {
             while let Ok((socket, _)) = listener.accept().await {
                 let config = config.clone();
@@ -61,9 +70,16 @@ impl TestServer {
                     authorized: authorized.clone(),
                     user: String::new(),
                     shells: HashMap::new(),
+                    agent_forwarding: false,
+                    forwards: Vec::new(),
                 };
+                let tracked = tracked.clone();
                 tokio::spawn(async move {
                     if let Ok(session) = server::run_stream(config, socket, handler).await {
+                        tracked
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(session.handle());
                         let _ = session.await;
                     }
                 });
@@ -73,6 +89,23 @@ impl TestServer {
             addr,
             host_key: host_public,
             task,
+            sessions,
+        }
+    }
+
+    /// Disconnect every open session (as if the server restarted) while
+    /// still accepting new connections.
+    pub async fn drop_connections(&self) {
+        let sessions: Vec<server::Handle> = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+            .collect();
+        for session in sessions {
+            let _ = session
+                .disconnect(russh::Disconnect::ByApplication, "test".into(), "en".into())
+                .await;
         }
     }
 }
@@ -94,6 +127,32 @@ struct ShellHandler {
     authorized: Arc<[PublicKey]>,
     user: String,
     shells: HashMap<ChannelId, FakeShell>,
+    agent_forwarding: bool,
+    /// Listeners for remote forwards; stopped with the session.
+    forwards: Vec<JoinHandle<()>>,
+}
+
+impl Drop for ShellHandler {
+    fn drop(&mut self) {
+        for forward in &self.forwards {
+            forward.abort();
+        }
+    }
+}
+
+/// Ask the client's forwarded agent for its keys and describe them.
+async fn list_agent_keys(handle: &server::Handle) -> String {
+    let Ok(channel) = handle.channel_open_agent().await else {
+        return "agent: channel refused".into();
+    };
+    let mut agent = AgentClient::connect(channel.into_stream());
+    match agent.request_identities().await {
+        Ok(keys) => {
+            let comments: Vec<String> = keys.iter().map(|k| k.comment().to_owned()).collect();
+            format!("agent: {} keys: {}", keys.len(), comments.join(","))
+        }
+        Err(e) => format!("agent: error {e}"),
+    }
 }
 
 impl ShellHandler {
@@ -110,6 +169,19 @@ impl ShellHandler {
             session.exit_status_request(channel, code)?;
             session.eof(channel)?;
             return session.close(channel);
+        }
+        if line == "agent-keys" {
+            if !self.agent_forwarding {
+                return session.data(channel, b"agent: not forwarded\r\n$ ".to_vec());
+            }
+            let handle = session.handle();
+            tokio::spawn(async move {
+                let text = list_agent_keys(&handle).await;
+                let _ = handle
+                    .data(channel, format!("{text}\r\n$ ").into_bytes())
+                    .await;
+            });
+            return Ok(());
         }
         let reply = match line {
             "" => String::new(),
@@ -205,6 +277,22 @@ impl server::Handler for ShellHandler {
     ) -> Result<(), Self::Error> {
         session.channel_success(channel)?;
         let command = String::from_utf8_lossy(command);
+        if command == "agent-keys" {
+            let handle = session.handle();
+            let forwarded = self.agent_forwarding;
+            tokio::spawn(async move {
+                let text = if forwarded {
+                    list_agent_keys(&handle).await
+                } else {
+                    "agent: not forwarded".into()
+                };
+                let _ = handle.data(channel, format!("{text}\n").into_bytes()).await;
+                let _ = handle.exit_status_request(channel, 0).await;
+                let _ = handle.eof(channel).await;
+                let _ = handle.close(channel).await;
+            });
+            return Ok(());
+        }
         let status = if let Some(text) = command.strip_prefix("echo ") {
             session.data(channel, format!("{text}\n").into_bytes())?;
             0
@@ -223,12 +311,96 @@ impl server::Handler for ShellHandler {
         session.close(channel)
     }
 
+    async fn agent_request(
+        &mut self,
+        _channel: ChannelId,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        self.agent_forwarding = true;
+        Ok(true)
+    }
+
+    async fn channel_open_direct_tcpip(
+        &mut self,
+        channel: Channel<Msg>,
+        host: &str,
+        port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let target = u16::try_from(port).ok();
+        let tcp = match target {
+            Some(port) => TcpStream::connect((host, port)).await.ok(),
+            None => None,
+        };
+        let Some(mut tcp) = tcp else {
+            reply.reject(ChannelOpenFailure::ConnectFailed).await;
+            return Ok(());
+        };
+        reply.accept().await;
+        tokio::spawn(async move {
+            let mut stream = channel.into_stream();
+            let _ = tokio::io::copy_bidirectional(&mut stream, &mut tcp).await;
+        });
+        Ok(())
+    }
+
+    async fn tcpip_forward(
+        &mut self,
+        address: &str,
+        port: &mut u32,
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        let bind_ip = match address {
+            "" | "localhost" | "0.0.0.0" => "127.0.0.1",
+            other => other,
+        };
+        let Ok(requested) = u16::try_from(*port) else {
+            return Ok(false);
+        };
+        let Ok(listener) = TcpListener::bind((bind_ip, requested)).await else {
+            return Ok(false);
+        };
+        let Ok(local) = listener.local_addr() else {
+            return Ok(false);
+        };
+        *port = local.port().into();
+        let (handle, address, port) = (session.handle(), address.to_owned(), *port);
+        self.forwards.push(tokio::spawn(async move {
+            while let Ok((mut tcp, peer)) = listener.accept().await {
+                let Ok(channel) = handle
+                    .channel_open_forwarded_tcpip(
+                        address.clone(),
+                        port,
+                        peer.ip().to_string(),
+                        peer.port().into(),
+                    )
+                    .await
+                else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let mut stream = channel.into_stream();
+                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut tcp).await;
+                });
+            }
+        }));
+        Ok(true)
+    }
+
     async fn data(
         &mut self,
         channel: ChannelId,
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        // Only session channels run the fake shell; forwarding channels
+        // carry their own data.
+        if !self.shells.contains_key(&channel) {
+            return Ok(());
+        }
         for &byte in data {
             if byte == b'\r' || byte == b'\n' {
                 let shell = self.shells.entry(channel).or_default();

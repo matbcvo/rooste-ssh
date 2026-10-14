@@ -1,20 +1,32 @@
 //! One terminal tab: a session, its terminal and pending prompts.
 
+use std::time::{Duration, Instant};
+
 use egui::{Align, Layout, RichText, Ui};
 use rooste_core::Settings;
 use rooste_proto::ssh::UnknownHostKey;
 use rooste_term::{Palette, TermEvent, Terminal};
 use tokio::sync::oneshot;
 
-use crate::session::{ConnectRequest, PromptKind, Session, SessionCommand, SessionEvent};
+use crate::session::{
+    ConnectRequest, Failure, PromptKind, Session, SessionCommand, SessionEvent, TunnelStatus,
+};
 use crate::terminal_view::TerminalView;
 use crate::theme;
+
+/// Reconnect attempts before giving up.
+const MAX_RECONNECTS: u32 = 10;
 
 /// Connection state of a tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabState {
     Connecting(String),
     Connected,
+    /// The connection dropped; trying again at `at`.
+    Reconnecting {
+        attempt: u32,
+        at: Instant,
+    },
     Closed(Option<u32>),
     Failed(String),
 }
@@ -31,12 +43,13 @@ pub struct PendingPrompt {
 /// What a tab asks the application to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabAction {
-    Reconnect,
     /// Save this password for the tab's profile.
     SavePassword {
         profile_id: String,
         password: String,
     },
+    /// The user allowed legacy algorithms for this tab (and its profile).
+    EnableLegacy { profile_id: Option<String> },
 }
 
 #[derive(Debug)]
@@ -52,11 +65,22 @@ pub struct SessionTab {
     pub profile_id: Option<String>,
     /// Save a password entered at the prompt for this profile.
     pub save_password: bool,
+    pub tunnels: Vec<TunnelStatus>,
+    /// Input typed here goes to every broadcasting tab.
+    pub broadcast: bool,
+    /// Input waiting to be broadcast by the app.
+    pub outbox: Vec<u8>,
+    pub auto_reconnect: bool,
+    /// Why the last attempt failed, when it did.
+    pub failure: Option<Failure>,
+    pub prompt: Option<PendingPrompt>,
     session: Session,
     host_key: Option<(UnknownHostKey, oneshot::Sender<bool>)>,
-    pub prompt: Option<PendingPrompt>,
     /// Grid size the server was last told about.
     remote_size: (u16, u16),
+    reconnects: u32,
+    runtime: tokio::runtime::Handle,
+    ctx: egui::Context,
     actions: Vec<TabAction>,
 }
 
@@ -68,8 +92,6 @@ impl SessionTab {
         request: ConnectRequest,
         settings: &Settings,
     ) -> Self {
-        let wake_ctx = ctx.clone();
-        let session = Session::spawn(runtime, request.clone(), move || wake_ctx.request_repaint());
         let mut view = TerminalView::default();
         theme::apply_to_view(&mut view, settings);
         Self {
@@ -84,28 +106,80 @@ impl SessionTab {
             ),
             view,
             remote_size: (request.cols.max(1), request.rows.max(1)),
+            session: Self::spawn(runtime, ctx, request.clone()),
             request,
             profile_id: None,
             save_password: false,
-            session,
-            host_key: None,
+            tunnels: Vec::new(),
+            broadcast: false,
+            outbox: Vec::new(),
+            auto_reconnect: settings.auto_reconnect,
+            failure: None,
             prompt: None,
+            host_key: None,
+            reconnects: 0,
+            runtime: runtime.clone(),
+            ctx: ctx.clone(),
             actions: Vec::new(),
         }
+    }
+
+    fn spawn(
+        runtime: &tokio::runtime::Handle,
+        ctx: &egui::Context,
+        request: ConnectRequest,
+    ) -> Session {
+        let wake = ctx.clone();
+        Session::spawn(runtime, request, move || wake.request_repaint())
+    }
+
+    /// A new tab connecting to the same place.
+    pub fn duplicate(&self, settings: &Settings) -> Self {
+        let mut tab = Self::open(
+            &self.runtime,
+            &self.ctx,
+            self.name.clone(),
+            self.request.clone(),
+            settings,
+        );
+        tab.profile_id = self.profile_id.clone();
+        tab.save_password = self.save_password;
+        tab
+    }
+
+    /// Connect again in this tab, keeping the terminal contents.
+    pub fn restart(&mut self) {
+        self.close();
+        let (cols, rows) = self.terminal.size();
+        (self.request.cols, self.request.rows) = (cols, rows);
+        self.remote_size = (cols, rows);
+        self.session = Self::spawn(&self.runtime, &self.ctx, self.request.clone());
+        self.state = TabState::Connecting("Connecting…".into());
+        self.failure = None;
+        self.tunnels.clear();
     }
 
     /// Title for the tab bar.
     pub fn title(&self) -> String {
         let marker = match self.state {
-            TabState::Connecting(_) => "… ",
+            TabState::Connecting(_) | TabState::Reconnecting { .. } => "… ",
             TabState::Connected => "",
             TabState::Closed(_) | TabState::Failed(_) => "✕ ",
         };
-        format!("{marker}{}", self.name)
+        let legacy = if self.request.allow_legacy {
+            "⚠ "
+        } else {
+            ""
+        };
+        let broadcast = if self.broadcast { "📢 " } else { "" };
+        format!("{marker}{legacy}{broadcast}{}", self.name)
     }
 
     pub fn is_active(&self) -> bool {
-        matches!(self.state, TabState::Connecting(_) | TabState::Connected)
+        matches!(
+            self.state,
+            TabState::Connecting(_) | TabState::Connected | TabState::Reconnecting { .. }
+        )
     }
 
     /// The host key waiting for the user's decision, if any.
@@ -130,13 +204,51 @@ impl SessionTab {
         theme::apply_to_view(&mut self.view, settings);
         self.terminal.set_palette(theme::palette(settings.theme));
         self.terminal.set_scrollback(settings.scrollback_lines);
+        self.auto_reconnect = settings.auto_reconnect;
     }
 
     pub fn palette(&self) -> Palette {
         self.terminal.palette()
     }
 
-    /// Handle session and terminal events.
+    /// Send input to the remote side (used for broadcasts).
+    pub fn send_input(&mut self, bytes: Vec<u8>) {
+        if self.state == TabState::Connected {
+            self.terminal.scroll_to_bottom();
+            self.session.send(SessionCommand::Input(bytes));
+        }
+    }
+
+    fn note(&mut self, text: &str) {
+        self.terminal
+            .advance(format!("\r\n\x1b[33m{text}\x1b[0m\r\n").as_bytes());
+    }
+
+    fn failed(&mut self, failure: Failure) {
+        self.prompt = None;
+        if failure.lost && self.auto_reconnect && self.reconnects < MAX_RECONNECTS {
+            self.reconnects += 1;
+            let delay = Duration::from_secs(2u64.pow(self.reconnects.min(5)).min(30));
+            self.note(&format!(
+                "[{} — reconnecting in {}s]",
+                failure.message,
+                delay.as_secs()
+            ));
+            self.state = TabState::Reconnecting {
+                attempt: self.reconnects,
+                at: Instant::now() + delay,
+            };
+            self.failure = Some(failure);
+            return;
+        }
+        if failure.lost {
+            self.note(&format!("[{}]", failure.message));
+        }
+        self.state = TabState::Failed(failure.message.clone());
+        self.failure = Some(failure);
+    }
+
+    /// Handle session and terminal events, and due reconnects.
     pub fn poll(&mut self, ctx: &egui::Context) {
         for event in self.session.poll() {
             match event {
@@ -160,16 +272,28 @@ impl SessionTab {
                         });
                     }
                 }
-                SessionEvent::Connected => self.state = TabState::Connected,
+                SessionEvent::Connected => {
+                    if self.reconnects > 0 {
+                        self.note("[reconnected]");
+                    }
+                    self.reconnects = 0;
+                    self.state = TabState::Connected;
+                }
+                SessionEvent::Tunnels(statuses) => self.tunnels = statuses,
                 SessionEvent::Output(bytes) => self.terminal.advance(&bytes),
                 SessionEvent::Closed { exit_status } => {
                     self.prompt = None;
                     self.state = TabState::Closed(exit_status)
                 }
-                SessionEvent::Failed(message) => {
-                    self.prompt = None;
-                    self.state = TabState::Failed(message)
-                }
+                SessionEvent::Failed(failure) => self.failed(failure),
+            }
+        }
+        if let TabState::Reconnecting { at, .. } = self.state {
+            let now = Instant::now();
+            if now >= at {
+                self.restart();
+            } else {
+                ctx.request_repaint_after(at - now);
             }
         }
         for event in self.terminal.take_events() {
@@ -192,6 +316,12 @@ impl SessionTab {
         match &self.state {
             TabState::Connecting(text) => text.clone(),
             TabState::Connected => "Connected".into(),
+            TabState::Reconnecting { attempt, at } => {
+                let secs = at.saturating_duration_since(Instant::now()).as_secs() + 1;
+                format!(
+                    "Connection lost. Reconnecting in {secs}s (attempt {attempt} of {MAX_RECONNECTS})…"
+                )
+            }
             TabState::Closed(Some(code)) => format!("Session closed (exit status {code})"),
             TabState::Closed(None) => "Session closed".into(),
             TabState::Failed(message) => message.clone(),
@@ -204,7 +334,7 @@ impl SessionTab {
         self.session.send(SessionCommand::Close);
     }
 
-    /// Draw the tab: a status line when not connected, then the terminal.
+    /// Draw the tab: status and tunnel lines when needed, then the terminal.
     pub fn ui(&mut self, ui: &mut Ui) {
         if !matches!(self.state, TabState::Connected) {
             ui.horizontal(|ui| {
@@ -213,12 +343,63 @@ impl SessionTab {
                     TabState::Failed(_) => ui.colored_label(ui.visuals().error_fg_color, status),
                     _ => ui.label(RichText::new(status).italics()),
                 };
-                if !self.is_active() {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Reconnect").clicked() {
-                            self.actions.push(TabAction::Reconnect);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    match self.state {
+                        TabState::Reconnecting { .. } => {
+                            if ui.button("Cancel").clicked() {
+                                let message = self.failure.as_ref().map_or_else(
+                                    || "Connection lost".into(),
+                                    |f| f.message.clone(),
+                                );
+                                self.state = TabState::Failed(message);
+                            }
+                            if ui.button("Reconnect now").clicked() {
+                                self.restart();
+                            }
                         }
-                    });
+                        TabState::Closed(_) | TabState::Failed(_) => {
+                            if ui.button("Reconnect").clicked() {
+                                self.reconnects = 0;
+                                self.restart();
+                            }
+                            if self.failure.as_ref().is_some_and(|f| f.legacy_hint)
+                                && ui
+                                    .button("Allow legacy algorithms and retry")
+                                    .on_hover_text(
+                                        "This server only supports outdated SHA-1/CBC algorithms. \
+                                     Only continue if you trust the network.",
+                                    )
+                                    .clicked()
+                            {
+                                self.request.allow_legacy = true;
+                                self.actions.push(TabAction::EnableLegacy {
+                                    profile_id: self.profile_id.clone(),
+                                });
+                                self.restart();
+                            }
+                        }
+                        _ => {}
+                    }
+                });
+            });
+        }
+        if !self.tunnels.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                for tunnel in &self.tunnels {
+                    match &tunnel.result {
+                        Ok(detail) => {
+                            ui.label(RichText::new(format!("✔ {}", tunnel.description)).small())
+                                .on_hover_text(detail);
+                        }
+                        Err(error) => {
+                            ui.label(
+                                RichText::new(format!("✖ {}", tunnel.description))
+                                    .small()
+                                    .color(ui.visuals().error_fg_color),
+                            )
+                            .on_hover_text(error);
+                        }
+                    }
                 }
             });
         }
@@ -231,7 +412,11 @@ impl SessionTab {
                 self.remote_size = size;
             }
             if !out.send.is_empty() {
-                self.session.send(SessionCommand::Input(out.send));
+                if self.broadcast {
+                    self.outbox.extend(out.send);
+                } else {
+                    self.session.send(SessionCommand::Input(out.send));
+                }
             }
         }
     }

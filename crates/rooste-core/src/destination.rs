@@ -1,7 +1,5 @@
 //! Parsing `[user@]host[:port]`, including bracketed IPv6 addresses.
 
-use anyhow::{Context, bail};
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Destination {
     pub user: Option<String>,
@@ -9,8 +7,27 @@ pub struct Destination {
     pub port: Option<u16>,
 }
 
+/// Why a destination could not be parsed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct DestinationError(String);
+
+macro_rules! bail {
+    ($($arg:tt)*) => { return Err(DestinationError(format!($($arg)*))) };
+}
+
 impl Destination {
-    pub fn parse(input: &str) -> anyhow::Result<Self> {
+    /// Parse a comma-separated jump host list, as OpenSSH `ProxyJump`.
+    pub fn parse_list(input: &str) -> Result<Vec<Self>, DestinationError> {
+        input
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(Self::parse)
+            .collect()
+    }
+
+    pub fn parse(input: &str) -> Result<Self, DestinationError> {
         let (user, rest) = match input.rsplit_once('@') {
             Some((user, rest)) if !user.is_empty() => (Some(user.to_owned()), rest),
             Some(_) => bail!("empty user name in `{input}`"),
@@ -20,7 +37,7 @@ impl Destination {
         let (host, port) = if let Some(bracketed) = rest.strip_prefix('[') {
             let (host, after) = bracketed
                 .split_once(']')
-                .with_context(|| format!("missing `]` in `{input}`"))?;
+                .ok_or_else(|| DestinationError(format!("missing `]` in `{input}`")))?;
             match after {
                 "" => (host, None),
                 _ => (host, Some(after.strip_prefix(':').unwrap_or(after))),
@@ -39,7 +56,7 @@ impl Destination {
         let port = port
             .map(|p| {
                 p.parse::<u16>()
-                    .with_context(|| format!("invalid port `{p}`"))
+                    .map_err(|_| DestinationError(format!("invalid port `{p}`")))
             })
             .transpose()?;
         Ok(Self {
@@ -92,6 +109,15 @@ mod tests {
         assert_eq!(d.host, "fe80::1");
         assert_eq!(d.port, Some(22));
         assert_eq!(parse("[::1]").port, None);
+    }
+
+    #[test]
+    fn jump_lists() {
+        let hops = Destination::parse_list("a@bastion:2222, inner").unwrap();
+        assert_eq!(hops.len(), 2);
+        assert_eq!(hops[0].port, Some(2222));
+        assert_eq!(hops[1].host, "inner");
+        assert!(Destination::parse_list("").unwrap().is_empty());
     }
 
     #[test]

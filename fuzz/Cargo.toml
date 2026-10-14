@@ -1,0 +1,40 @@
+[package]
+name = "rooste-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Separate from the main workspace: it needs a nightly toolchain.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+rooste-core = { path = "../crates/rooste-core" }
+rooste-term = { path = "../crates/rooste-term" }
+
+[[bin]]
+name = "terminal"
+path = "fuzz_targets/terminal.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ssh_config"
+path = "fuzz_targets/ssh_config.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "putty_session"
+path = "fuzz_targets/putty_session.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "destination"
+path = "fuzz_targets/destination.rs"
+test = false
+doc = false
