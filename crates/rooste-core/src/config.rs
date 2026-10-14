@@ -168,6 +168,20 @@ impl Config {
     }
 }
 
+/// `%APPDATA%\rooste-ssh` on Windows, `$XDG_CONFIG_HOME/rooste-ssh` (or
+/// `~/.config/rooste-ssh`) elsewhere.
+fn platform_config_dir() -> Option<PathBuf> {
+    let base = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| std::env::home_dir().map(|h| h.join(".config")))
+    };
+    base.map(|b| b.join("rooste-ssh"))
+}
+
 /// Where the configuration file is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigLocation {
@@ -188,8 +202,8 @@ impl ConfigLocation {
         {
             return location;
         }
-        let path = directories::ProjectDirs::from("", "", "rooste-ssh")
-            .map(|dirs| dirs.config_dir().join(FILE_NAME))
+        let path = platform_config_dir()
+            .map(|dir| dir.join(FILE_NAME))
             .unwrap_or_else(|| PathBuf::from(FILE_NAME));
         Self {
             path,

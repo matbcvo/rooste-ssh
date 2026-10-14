@@ -10,7 +10,6 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-directories.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true

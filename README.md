@@ -29,7 +29,7 @@ with `-i`), then asks for a password. Unknown host keys are confirmed interactiv
 ## Configuration
 
 Settings and saved sessions are stored in `config.toml` in the platform config directory
-(`~/.config/rooste-ssh/` on Linux, `%APPDATA%\rooste-ssh\config\` on Windows). To run portably,
+(`~/.config/rooste-ssh/` on Linux, `%APPDATA%\rooste-ssh\` on Windows). To run portably,
 for example from a USB stick, put an empty file named `portable` next to the executable; the
 configuration is then kept in `rooste.toml` beside it. Saved passwords go to the system keyring,
 never into the configuration file.

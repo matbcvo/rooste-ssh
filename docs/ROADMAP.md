@@ -46,7 +46,7 @@ agent on Windows.
 | Agent | `ssh-agent-lib` | Unix socket on Linux; OpenSSH named pipe on Windows |
 | Secrets | `keyring` | Windows Credential Manager, Linux Secret Service |
 | Serial | `serialport` | |
-| Config | `serde` + `toml`, `directories` | |
+| Config | `serde` + `toml` | |
 
 ## Architecture
 
