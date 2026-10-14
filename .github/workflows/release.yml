@@ -280,7 +280,21 @@ jobs:
             -exec cp {} release/ \;
           (cd release && sha256sum * > SHA256SUMS)
           cat release/SHA256SUMS
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The version's section, without its heading, up to the next one.
+          awk -v v="$version" '
+            /^## \[/ { if (found) exit; if (index($0, "## [" v "]") == 1) { found = 1; next } }
+            /^\[[^]]+\]: / { next }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section for $version"; exit 1; }
+          if grep -q "^## \[$version\] - unreleased" CHANGELOG.md; then
+            echo "Set the release date for $version in CHANGELOG.md"; exit 1
+          fi
+          cat notes.md
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" release/* --title "rooste-ssh ${GITHUB_REF_NAME#v}" --generate-notes
+        run: gh release create "${GITHUB_REF_NAME}" release/* --title "Rooste SSH ${GITHUB_REF_NAME#v}" --notes-file notes.md --generate-notes

@@ -391,3 +391,129 @@ fn render_files_panel() {
     std::fs::create_dir_all(&out).unwrap();
     image.save(out.join("files-panel.png")).unwrap();
 }
+
+/// Screenshots for the README: saved sessions, a terminal with some
+/// colored output and the file panel, in the dark and light themes.
+#[test]
+#[ignore = "renders with wgpu; run manually to inspect the output"]
+fn render_readme() {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use rooste_core::{Config, MemoryStore, Profile, Theme};
+    use rooste_gui::RoosteApp;
+    use rooste_testkit::{TEST_PASSWORD, TEST_USER, TestServer};
+
+    let net = tokio::runtime::Runtime::new().unwrap();
+    let server = net.block_on(TestServer::start());
+    let root = server.sftp_root().to_owned();
+    for dir in ["logs", "releases"] {
+        std::fs::create_dir(root.join(dir)).unwrap();
+    }
+    for (name, size) in [
+        ("backup-2026-10-13.tar.gz", 48_000),
+        ("deploy.sh", 900),
+        ("nginx.conf", 2_400),
+    ] {
+        std::fs::write(root.join(name), vec![b'x'; size]).unwrap();
+    }
+    let p = |name: &str, folder: &str| Profile {
+        name: name.into(),
+        folder: folder.into(),
+        host: format!("{}.example.com", name.to_lowercase().replace(' ', "-")),
+        user: "deploy".into(),
+        ..Profile::default()
+    };
+    let live = Profile {
+        name: "web-1".into(),
+        folder: "Production".into(),
+        host: "127.0.0.1".into(),
+        port: Some(server.addr.port()),
+        user: TEST_USER.into(),
+        use_agent: false,
+        save_password: true,
+        ..Profile::default()
+    };
+    let output = concat!(
+        "\x1b[1;32mdeploy@web-1\x1b[0m:\x1b[1;34m~\x1b[0m$ systemctl status nginx --no-pager\r\n",
+        "\x1b[1;32m●\x1b[0m nginx.service - A high performance web server\r\n",
+        "     Loaded: loaded (/lib/systemd/system/nginx.service; \x1b[1;32menabled\x1b[0m)\r\n",
+        "     Active: \x1b[1;32mactive (running)\x1b[0m since Tue 2026-10-13 09:12:44 UTC; 1 day ago\r\n",
+        "   Main PID: 812 (nginx)\r\n",
+        "      Tasks: 5 (limit: 9425)\r\n",
+        "     Memory: 11.2M\r\n",
+        "\r\n",
+        "\x1b[1;32mdeploy@web-1\x1b[0m:\x1b[1;34m~\x1b[0m$ ls -l --color\r\n",
+        "drwxr-xr-x 2 deploy deploy 4096 Oct 14 08:01 \x1b[1;34mlogs\x1b[0m\r\n",
+        "drwxr-xr-x 5 deploy deploy 4096 Oct 13 17:40 \x1b[1;34mreleases\x1b[0m\r\n",
+        "-rw-r--r-- 1 deploy deploy  48K Oct 13 03:00 \x1b[1;31mbackup-2026-10-13.tar.gz\x1b[0m\r\n",
+        "-rwxr-xr-x 1 deploy deploy  900 Oct 12 11:24 \x1b[1;32mdeploy.sh\x1b[0m\r\n",
+        "-rw-r--r-- 1 deploy deploy 2.4K Oct 10 14:02 nginx.conf\r\n",
+        "\r\n",
+        "\x1b[1;32mdeploy@web-1\x1b[0m:\x1b[1;34m~\x1b[0m$ ",
+    );
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
+    std::fs::create_dir_all(&out).unwrap();
+    for theme in [Theme::Dark, Theme::Light] {
+        let dir = tempfile::tempdir().unwrap();
+        let known_hosts = dir.path().join("known_hosts");
+        rooste_protocols::ssh::known_hosts::learn(
+            &known_hosts,
+            "127.0.0.1",
+            server.addr.port(),
+            &server.host_key,
+        )
+        .unwrap();
+        let mut config = Config {
+            profiles: vec![
+                live.clone(),
+                p("web-2", "Production"),
+                p("db-primary", "Production"),
+                p("staging", "Staging"),
+                p("Raspberry Pi", "Home"),
+                p("NAS", "Home"),
+            ],
+            ..Config::default()
+        };
+        config.settings.theme = theme;
+        let app = RoosteApp::with_config(config, None, Arc::new(MemoryStore::default()))
+            .with_known_hosts(known_hosts);
+        app.secrets().set(&live.id, TEST_PASSWORD).unwrap();
+        let mut harness = Harness::builder()
+            .with_size([1280.0, 720.0])
+            .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
+        rooste_gui::fonts::install(&harness.ctx);
+        let ctx = harness.ctx.clone();
+        harness.state_mut().connect_profile(&ctx, &live.id);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let ready = |app: &RoosteApp| {
+            app.tabs()
+                .next()
+                .and_then(|t| t.files.as_ref())
+                .is_some_and(|f| f.entries.len() == 5)
+        };
+        while !ready(harness.state()) {
+            assert!(Instant::now() < deadline);
+            let tab = harness.state_mut().tabs_mut().next().unwrap();
+            if tab.files.is_none() && tab.state == rooste_gui::app::TabState::Connected {
+                tab.toggle_files();
+            }
+            harness.step();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let tab = harness.state_mut().tabs_mut().next().unwrap();
+        tab.terminal.advance(b"\x1b[2J\x1b[H");
+        tab.terminal.advance(output.as_bytes());
+        let files = tab.files.as_mut().unwrap();
+        files.selected = vec![files.entries[2].path.clone()];
+        for _ in 0..5 {
+            harness.step();
+        }
+        let image = harness.render().expect("render with wgpu");
+        let name = match theme {
+            Theme::Dark => "readme-dark.png",
+            Theme::Light => "readme-light.png",
+        };
+        image.save(out.join(name)).unwrap();
+    }
+}

@@ -1,0 +1,56 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! For security problems, please use
+        [private reporting](https://github.com/matbcvo/rooste-ssh/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Connect to ...
+        2. Click ...
+  - type: input
+    id: version
+    attributes:
+      label: Rooste SSH version
+      description: Shown by `rooste --version`.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os-details
+    attributes:
+      label: OS version and how you installed it
+      placeholder: "Windows 11 24H2, MSI / Ubuntu 24.04, .deb / Fedora 41, Flatpak"
+  - type: input
+    id: server
+    attributes:
+      label: Server, if relevant
+      placeholder: "OpenSSH 9.6 on Debian, a network switch, ..."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error messages or screenshots
+      description: Remove passwords, keys and host names you don't want to share.
