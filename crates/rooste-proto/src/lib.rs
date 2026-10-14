@@ -6,7 +6,10 @@
 use std::future::Future;
 use std::io;
 
+pub mod raw;
+pub mod serial;
 pub mod ssh;
+pub mod telnet;
 
 /// A bidirectional byte stream backing one terminal session.
 pub trait Transport: Send {

@@ -46,7 +46,7 @@ protocol to other programs is planned for later.)
 | Keys | `ssh-key` + own `.ppk` parser | Generate/convert keys, import `.ppk` keys |
 | Agent | `ssh-agent-lib` | Unix socket on Linux; OpenSSH named pipe on Windows |
 | Secrets | `keyring` | Windows Credential Manager, Linux Secret Service |
-| Serial | `serialport` | |
+| Serial | `serial2` | Permissive license (BSD-2-Clause/Apache-2.0) |
 | Config | `serde` + `toml` | |
 
 ## Architecture
@@ -133,11 +133,15 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
   PuTTYgen 0.83); built-in agent on a Unix socket or named pipe, usable by rooste-ssh sessions
   and other programs. `.ppk` keys also work directly as profile key files.
 
-### M5b — Extra protocols
+### M5b — Extra protocols ✅
 - **Raw TCP:** plain `tokio` TCP stream.
 - **Telnet:** small built-in implementation (ECHO, SGA, NAWS window size, TTYPE terminal type).
-- **Serial:** `serialport`; baud rate, data bits, parity, stop bits, flow control; port picker
-  (`COMx` on Windows, `/dev/ttyUSB*` and `/dev/ttyS*` on Linux).
+- **Serial:** `serial2` (BSD/Apache; `serialport` is MPL-2.0); baud rate, data bits, parity,
+  stop bits, flow control; port picker (`COMx` on Windows, `/dev/ttyUSB*` and `/dev/ttyS*` on
+  Linux). PuTTY serial sessions import with their line settings.
+- **Tests:** shared conformance checks for every transport; telnet negotiation unit tests and an
+  in-process telnet server; BusyBox `telnetd` in Linux CI; serial over a pseudo-terminal pair on
+  Unix; kittest tests for telnet, raw and serial profiles.
 
 ### M6 — Distribution
 - Windows: MSI (`cargo-wix`), winget, portable zip, code signing.

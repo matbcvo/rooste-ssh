@@ -16,5 +16,6 @@ updates:
       - /crates/rooste-testkit/docker/openssh
       - /crates/rooste-testkit/docker/dropbear
       - /crates/rooste-testkit/docker/legacy
+      - /crates/rooste-testkit/docker/telnet
     schedule:
       interval: weekly

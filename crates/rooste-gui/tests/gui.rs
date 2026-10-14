@@ -392,10 +392,15 @@ fn import_from_ssh_config_and_putty() {
     harness.get_by_label("Switch 1");
     assert_eq!(f.saved_config().profiles.len(), 3);
 
-    // Telnet arrives in M5b; connecting explains instead of failing oddly.
-    context_menu(&mut harness, "Switch 1", "Connect");
-    harness.get_by_label("Telnet connections are not supported yet; only SSH is available.");
-    assert_eq!(harness.state().tabs().count(), 0);
+    let switch = harness
+        .state()
+        .config
+        .profiles
+        .iter()
+        .find(|p| p.name == "Switch 1")
+        .unwrap()
+        .clone();
+    assert_eq!(switch.protocol, rooste_core::Protocol::Telnet);
 }
 
 #[test]
@@ -1016,4 +1021,123 @@ fn builtin_agent_logs_into_sessions() {
         connected_count(app) == 1
     });
     assert!(first_tab(harness.state()).unwrap().prompt.is_none());
+}
+
+// ---- M5b: telnet, raw TCP and serial ----------------------------------------
+
+fn plain_profile(name: &str, protocol: rooste_core::Protocol, port: u16) -> Profile {
+    Profile {
+        name: name.into(),
+        protocol,
+        host: "127.0.0.1".into(),
+        port: Some(port),
+        ..Profile::default()
+    }
+}
+
+#[test]
+fn telnet_session_reports_window_size() {
+    let f = Fixture::new();
+    let server = f.net.block_on(rooste_testkit::TelnetServer::start());
+    let profile = plain_profile("switch", rooste_core::Protocol::Telnet, server.addr.port());
+    let mut harness = harness(f.app(Config {
+        profiles: vec![profile],
+        ..Config::default()
+    }));
+    context_menu(&mut harness, "switch", "Connect");
+    wait_for(&mut harness, "telnet prompt", |app| {
+        connected_count(app) == 1 && screen_text(app).contains("Welcome")
+    });
+    let (cols, rows) = first_tab(harness.state()).unwrap().terminal.size();
+    harness.event(egui::Event::Text("size".into()));
+    harness.key_press(egui::Key::Enter);
+    let expected = format!("{cols}x{rows}");
+    wait_for(&mut harness, "size via NAWS", |app| {
+        screen_text(app).contains(&expected)
+    });
+    harness.event(egui::Event::Text("ttype".into()));
+    harness.key_press(egui::Key::Enter);
+    wait_for(&mut harness, "terminal type", |app| {
+        screen_text(app).contains("xterm-256color")
+    });
+
+    // File transfer is SSH-only.
+    open_menu_item(&mut harness, "Tab", "Files (SFTP)");
+    wait_for(&mut harness, "files refused", |app| {
+        first_tab(app)
+            .and_then(|t| t.files.as_ref())
+            .is_some_and(|f| f.error.as_deref() == Some("File transfer needs an SSH connection."))
+    });
+}
+
+#[test]
+fn raw_tcp_session_echoes() {
+    let f = Fixture::new();
+    let echo = f.net.block_on(rooste_testkit::EchoServer::start());
+    let profile = plain_profile("raw echo", rooste_core::Protocol::Raw, echo.addr.port());
+    let mut harness = harness(f.app(Config {
+        profiles: vec![profile],
+        ..Config::default()
+    }));
+    context_menu(&mut harness, "raw echo", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+    harness.event(egui::Event::Text("ping over raw".into()));
+    wait_for(&mut harness, "echo", |app| {
+        screen_text(app).contains("ping over raw")
+    });
+}
+
+#[test]
+fn serial_profile_editor() {
+    let f = Fixture::new();
+    let mut harness = harness(f.app(Config::default()));
+    click(&mut harness, "➕");
+    let Some(Dialog::EditProfile(editor)) = &mut harness.state_mut().dialog else {
+        panic!("editor not open");
+    };
+    editor.profile.protocol = rooste_core::Protocol::Serial;
+    editor.profile.name = "console".into();
+    settle(&mut harness);
+    assert!(
+        harness.query_by_label("Jump host").is_none(),
+        "SSH fields hidden"
+    );
+    harness.get_by_label("Speed (baud)");
+    click(&mut harness, "Save");
+    harness.get_by_label("Enter a serial port, such as COM3 or /dev/ttyUSB0.");
+    type_into(&mut harness, "Serial port", "/dev/ttyUSB0");
+    click(&mut harness, "Even");
+    click(&mut harness, "RTS/CTS");
+    click(&mut harness, "Save");
+    let saved = f.saved_config();
+    let p = &saved.profiles[0];
+    assert_eq!(p.host, "/dev/ttyUSB0");
+    assert_eq!(p.serial.describe(), "9600 8E1");
+    assert_eq!(p.serial.flow_control, rooste_core::FlowControl::RtsCts);
+}
+
+#[test]
+fn missing_serial_port_fails_clearly() {
+    let f = Fixture::new();
+    let port = if cfg!(windows) {
+        "COM250"
+    } else {
+        "/dev/rooste-no-such-port"
+    };
+    let profile = Profile {
+        name: "nowhere".into(),
+        protocol: rooste_core::Protocol::Serial,
+        host: port.into(),
+        ..Profile::default()
+    };
+    let mut harness = harness(f.app(Config {
+        profiles: vec![profile],
+        ..Config::default()
+    }));
+    context_menu(&mut harness, "nowhere", "Connect");
+    wait_for(
+        &mut harness,
+        "failure",
+        |app| matches!(first_tab(app).map(|t| &t.state), Some(TabState::Failed(m)) if m.contains("Could not open the serial port") && m.contains(port)),
+    );
 }
