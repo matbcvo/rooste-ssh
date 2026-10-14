@@ -1,6 +1,6 @@
 [package]
 name = "rooste-core"
-description = "Session/profile model, configuration and PuTTY/ssh_config import"
+description = "Session/profile model, configuration, ssh_config and session import"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

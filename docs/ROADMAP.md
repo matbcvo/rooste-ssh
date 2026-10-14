@@ -2,28 +2,31 @@
 
 ## Goal
 
-A memory-safe, cross-platform (Linux and Windows) **GUI** SSH client written in Rust. It covers
-what PuTTY users rely on, including the PuTTYgen and Pageant parts, and adds the modern features
-PuTTY lacks.
+A memory-safe, cross-platform (Linux and Windows) **GUI** SSH client written in Rust, with
+everything needed for daily remote work in one app.
 
-### Where it beats PuTTY
+### Key features
 
-| PuTTY pain point | rooste-ssh |
-|---|---|
-| One window per session | Tabs and split panes |
-| Settings in the Windows registry, cramped dialog | Plain TOML config (portable mode), searchable session manager with folders and tags |
-| Ignores `~/.ssh/config` | Reads `~/.ssh/config` and `known_hosts`, imports PuTTY sessions |
-| Separate PSFTP, PuTTYgen, Pageant | SFTP browser, key generator and agent built in |
-| Clunky tunnels | Port-forwarding UI with saved tunnels, ProxyJump |
-| Dated rendering | True color, HiDPI, font fallback, optional ligatures |
-| Dropped connections stay dead | Auto-reconnect, keepalive, duplicate session |
-| No multi-host workflow | Broadcast input to several sessions, command palette |
+- Tabs and split panes
+- Searchable session manager with folders and tags; plain TOML config with a portable mode
+- Works with existing OpenSSH setups: reads `~/.ssh/config` and `known_hosts`
+- Built-in SFTP browser, key generator and SSH agent
+- Port-forwarding UI with saved tunnels, ProxyJump
+- Modern rendering: true color, HiDPI, font fallback, optional ligatures
+- Keepalive, auto-reconnect, duplicate session
+- Broadcast input to several sessions, command palette
+
+### Interoperability
+
+For people coming from other clients: import saved sessions from PuTTY (Windows registry,
+`~/.putty/sessions`), import `.ppk` keys, and serve existing Pageant clients from the built-in
+agent on Windows.
 
 ## Decisions
 
 | Topic | Decision |
 |---|---|
-| App type | GUI desktop app (egui). `rooste-cli` doubles as a test client and later a `plink` equivalent |
+| App type | GUI desktop app (egui). `rooste-cli` doubles as a test client and later a scriptable command-line client |
 | Protocols | SSH first. Serial, telnet and raw TCP in M5b, behind the `Transport` trait that exists from day one. rlogin is not planned |
 | Legacy algorithms | Modern defaults; a small legacy set can be enabled **per session only** (see [Security](#security)) |
 | Platforms | Linux and Windows. macOS may come for free later |
@@ -39,8 +42,8 @@ PuTTY lacks.
 | Terminal emulation | `alacritty_terminal` | Proven VT parser and grid |
 | GUI | `egui`/`eframe` + custom terminal widget | Fast to build, identical on both OSes, GPU via wgpu |
 | SFTP | `russh-sftp` | Pairs with russh |
-| Keys | `ssh-key` + own `.ppk` parser | Generate/convert keys, import PuTTY keys |
-| Agent | `ssh-agent-lib` | Unix socket on Linux; OpenSSH named pipe + Pageant compatibility on Windows |
+| Keys | `ssh-key` + own `.ppk` parser | Generate/convert keys, import `.ppk` keys |
+| Agent | `ssh-agent-lib` | Unix socket on Linux; OpenSSH named pipe on Windows |
 | Secrets | `keyring` | Windows Credential Manager, Linux Secret Service |
 | Serial | `serialport` | |
 | Config | `serde` + `toml`, `directories` | |
@@ -49,7 +52,7 @@ PuTTY lacks.
 
 ```
 crates/
-├─ rooste-core/     session/profile model, config, PuTTY + ssh_config import
+├─ rooste-core/     session/profile model, config, ssh_config and session import
 ├─ rooste-proto/    Transport trait: SSH (russh), later serial, telnet, raw
 ├─ rooste-term/     alacritty_terminal wrapper: input encoding, selection, scrollback
 ├─ rooste-keys/     keygen, .ppk import/export, agent client/server
@@ -91,7 +94,7 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
 
 ### M3 — First usable app (MVP)
 - Session manager with saved profiles.
-- Import from PuTTY (Windows registry, `~/.putty/sessions`) and `~/.ssh/config`.
+- Import from `~/.ssh/config` and other clients (see [Interoperability](#interoperability)).
 - Tabs, settings dialog, host-key confirmation dialog.
 - **Tests required:** `egui_kittest` tests for every new screen and dialog.
 
@@ -101,10 +104,10 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
 - Per-session "Allow legacy algorithms" option, ⚠ indicator on the tab, and an error message that
   offers to enable it when a server only supports legacy algorithms.
 
-### M5 — Replacing PuTTY's companion tools
+### M5 — Built-in tools
 - SFTP browser with drag and drop.
-- Key generator (PuTTYgen replacement).
-- Built-in agent (Pageant replacement).
+- Key generator, `.ppk` import/export.
+- Built-in SSH agent.
 
 ### M5b — Extra protocols
 - **Raw TCP:** plain `tokio` TCP stream.
@@ -150,7 +153,7 @@ disconnect, error handling).
 ### Windows caveat
 GitHub Windows runners cannot run Linux containers. There the in-process server covers
 integration tests, a separate job tests against the built-in Windows OpenSSH Server, and
-Windows-only code (Pageant, named-pipe agent, registry import) gets Windows-only tests.
+Windows-only code (named-pipe agent, registry import) gets Windows-only tests.
 
 ### GitHub workflows
 
