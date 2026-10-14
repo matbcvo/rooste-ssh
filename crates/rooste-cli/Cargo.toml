@@ -1,6 +1,6 @@
 [package]
 name = "rooste-cli"
-description = "Headless rooste-ssh client for testing and scripting"
+description = "Headless Rooste SSH client for testing and scripting"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

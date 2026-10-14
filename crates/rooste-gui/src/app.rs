@@ -131,7 +131,18 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
     }
 
     fn tab_title_for_pane(&mut self, tab: &SessionTab) -> egui::WidgetText {
-        tab.title().into()
+        let mut job = egui::text::LayoutJob::default();
+        let font = egui::FontId::proportional(14.0);
+        if tab.has_ended() {
+            let red = egui::TextFormat::simple(font.clone(), egui::Color32::from_rgb(220, 80, 80));
+            job.append("● ", 0.0, red);
+        }
+        job.append(
+            &tab.title(),
+            0.0,
+            egui::TextFormat::simple(font, egui::Color32::PLACEHOLDER),
+        );
+        job.into()
     }
 
     fn is_tab_closable(&self, _tiles: &egui_tiles::Tiles<SessionTab>, _tile_id: TileId) -> bool {
@@ -731,7 +742,7 @@ impl RoosteApp {
                 && self.notice.is_none()
             {
                 self.notice = Some(Notice {
-                    text: format!("rooste-ssh {} is available.", release.version),
+                    text: format!("Rooste SSH {} is available.", release.version),
                     error: false,
                     link: Some(("Download".into(), release.url)),
                 });
@@ -953,7 +964,7 @@ impl RoosteApp {
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(48.0);
             ui.vertical_centered(|ui| {
-                ui.heading("rooste-ssh");
+                ui.heading("Rooste SSH");
                 ui.add_space(4.0);
                 ui.label(RichText::new("Double-click a saved session, or connect quickly:").weak());
             });
@@ -1200,10 +1211,10 @@ impl RoosteApp {
             .and_then(|id| self.tree.tiles.get_pane(&id))
         {
             Some(tab) => format!(
-                "{} — rooste-ssh",
+                "{} — Rooste SSH",
                 tab.remote_title.clone().unwrap_or_else(|| tab.name.clone())
             ),
-            None => "rooste-ssh".into(),
+            None => "Rooste SSH".into(),
         };
         if title != self.window_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));

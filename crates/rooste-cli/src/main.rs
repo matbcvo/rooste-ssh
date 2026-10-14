@@ -22,7 +22,7 @@ use rooste_core::Destination;
 const EXIT_ERROR: u8 = 255;
 
 #[derive(Debug, Parser)]
-#[command(version, about = "Headless rooste-ssh client")]
+#[command(version, about = "Headless Rooste SSH client")]
 struct Args {
     #[arg(help = "Server to connect to: [user@]host[:port]")]
     destination: String,

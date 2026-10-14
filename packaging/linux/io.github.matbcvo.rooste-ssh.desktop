@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=rooste-ssh
+Name=Rooste SSH
 GenericName=SSH Client
 Comment=SSH, telnet and serial terminal with tabs, SFTP and port forwarding
 Exec=rooste

@@ -4515,7 +4515,11 @@ dependencies = [
 name = "rooste-proto"
 version = "0.1.0"
 dependencies = [
+ "aes",
+ "base64ct",
+ "des",
  "futures",
+ "md5",
  "rooste-testkit",
  "russh",
  "serial2-tokio",

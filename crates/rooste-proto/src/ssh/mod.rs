@@ -16,6 +16,7 @@ mod agent;
 pub mod algorithms;
 mod forward;
 pub mod known_hosts;
+mod legacy_pem;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -79,6 +80,12 @@ pub enum SshError {
     },
     #[error("the key {} is encrypted and needs a passphrase", .0.display())]
     KeyEncrypted(PathBuf),
+    #[error("{} is a public key; choose the private key file (usually the same name without .pub)", .0.display())]
+    PublicKeyFile(PathBuf),
+    #[error("{} is not a private key file", .0.display())]
+    NotAKey(PathBuf),
+    #[error("could not load key {}: {message}", path.display())]
+    KeyFormat { path: PathBuf, message: String },
     #[error("could not set up forwarding on {bind}")]
     Forward {
         bind: String,
@@ -93,6 +100,37 @@ pub enum SshError {
 
 /// Load a private key, decrypting it with `passphrase` if given.
 pub fn load_private_key(path: &Path, passphrase: Option<&str>) -> Result<PrivateKey, SshError> {
+    // Recognize files that aren't private keys before russh tries every
+    // format on them and reports a confusing parse error.
+    if let Ok(text) = std::fs::read_to_string(path) {
+        let start = text.trim_start();
+        if start.starts_with("ssh-")
+            || start.starts_with("ecdsa-")
+            || start.starts_with("sk-")
+            || start.starts_with("---- BEGIN SSH2 PUBLIC KEY")
+        {
+            return Err(SshError::PublicKeyFile(path.to_owned()));
+        }
+        if !start.starts_with("PuTTY-User-Key-File-") && !text.contains("PRIVATE KEY-----") {
+            return Err(SshError::NotAKey(path.to_owned()));
+        }
+        if legacy_pem::is_encrypted(&text) {
+            let Some(passphrase) = passphrase else {
+                return Err(SshError::KeyEncrypted(path.to_owned()));
+            };
+            let plain = legacy_pem::decrypt(&text, passphrase).map_err(|e| match e {
+                legacy_pem::Error::BadPassphrase => SshError::KeyEncrypted(path.to_owned()),
+                legacy_pem::Error::Format(message) => SshError::KeyFormat {
+                    path: path.to_owned(),
+                    message,
+                },
+            })?;
+            return keys::decode_secret_key(&plain, None).map_err(|source| SshError::Key {
+                path: path.to_owned(),
+                source,
+            });
+        }
+    }
     keys::load_secret_key(path, passphrase).map_err(|e| match e {
         keys::Error::KeyIsEncrypted => SshError::KeyEncrypted(path.to_owned()),
         // PuTTY keys report encryption through ssh-key's own error type.

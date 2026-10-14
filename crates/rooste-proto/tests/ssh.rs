@@ -294,3 +294,35 @@ async fn refused_connection_is_a_connect_error() {
         .unwrap_err();
     assert!(matches!(err, SshError::Connect(_)), "{err:?}");
 }
+
+#[test]
+fn legacy_encrypted_pem_keys_load() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for name in ["rsa_des3.pem", "rsa_aes256.pem"] {
+        let path = fixtures.join(name);
+        assert!(matches!(
+            load_private_key(&path, None),
+            Err(SshError::KeyEncrypted(_))
+        ));
+        assert!(matches!(
+            load_private_key(&path, Some("wrong")),
+            Err(SshError::KeyEncrypted(_))
+        ));
+        load_private_key(&path, Some("secret")).unwrap();
+    }
+}
+
+#[test]
+fn files_that_are_not_private_keys_get_a_clear_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let public = dir.path().join("id_ed25519.pub");
+    std::fs::write(&public, public_key("id_ed25519").to_openssh().unwrap()).unwrap();
+    let error = load_private_key(&public, None).unwrap_err();
+    assert!(matches!(error, SshError::PublicKeyFile(_)), "{error}");
+    assert!(error.to_string().contains("public key"));
+
+    let notes = dir.path().join("notes.txt");
+    std::fs::write(&notes, "just some text\n").unwrap();
+    let error = load_private_key(&notes, None).unwrap_err();
+    assert!(matches!(error, SshError::NotAKey(_)), "{error}");
+}

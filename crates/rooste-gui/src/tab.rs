@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use egui::{Align, Layout, RichText, Ui};
+use egui::{RichText, Ui};
 use rooste_core::Settings;
 use rooste_proto::ssh::UnknownHostKey;
 use rooste_term::{Palette, TermEvent, Terminal};
@@ -189,7 +189,8 @@ impl SessionTab {
         let marker = match self.state {
             TabState::Connecting(_) | TabState::Reconnecting { .. } => "… ",
             TabState::Connected => "",
-            TabState::Closed(_) | TabState::Failed(_) => "✕ ",
+            // Shown as a red dot by the tab bar (see `has_ended`).
+            TabState::Closed(_) | TabState::Failed(_) => "",
         };
         let legacy = if self.request.allow_legacy {
             "⚠ "
@@ -198,6 +199,11 @@ impl SessionTab {
         };
         let broadcast = if self.broadcast { "📢 " } else { "" };
         format!("{marker}{legacy}{broadcast}{}", self.name)
+    }
+
+    /// The session failed or closed.
+    pub fn has_ended(&self) -> bool {
+        matches!(self.state, TabState::Closed(_) | TabState::Failed(_))
     }
 
     pub fn is_active(&self) -> bool {
@@ -379,14 +385,20 @@ impl SessionTab {
     /// Draw the tab: status and tunnel lines when needed, then the terminal.
     pub fn ui(&mut self, ui: &mut Ui) {
         if !matches!(self.state, TabState::Connected) {
-            ui.horizontal(|ui| {
-                let status = self.status_text();
-                match self.state {
-                    TabState::Failed(_) => ui.colored_label(ui.visuals().error_fg_color, status),
-                    _ => ui.label(RichText::new(status).italics()),
-                };
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    match self.state {
+            // The status on its own line, wrapped (errors can be long), with
+            // any buttons below it.
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(8, 6))
+                .show(ui, |ui| {
+                    let status = self.status_text();
+                    let text = match self.state {
+                        TabState::Failed(_) => {
+                            RichText::new(status).color(ui.visuals().error_fg_color)
+                        }
+                        _ => RichText::new(status).italics(),
+                    };
+                    ui.add(egui::Label::new(text).wrap());
+                    ui.horizontal(|ui| match self.state {
                         TabState::Reconnecting { .. } => {
                             if ui.button("Cancel").clicked() {
                                 let message = self.failure.as_ref().map_or_else(
@@ -421,9 +433,8 @@ impl SessionTab {
                             }
                         }
                         _ => {}
-                    }
+                    });
                 });
-            });
         }
         if !self.tunnels.is_empty() {
             ui.horizontal_wrapped(|ui| {

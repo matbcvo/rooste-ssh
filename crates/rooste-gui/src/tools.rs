@@ -312,7 +312,7 @@ ui.add_space(10.0);
                     #[cfg(windows)]
                     let hint = format!("set SSH_AUTH_SOCK={var}");
                     ui.monospace(&hint);
-                    ui.checkbox(use_for_sessions, "Use this agent for rooste-ssh sessions");
+                    ui.checkbox(use_for_sessions, "Use this agent for Rooste SSH sessions");
                     ui.separator();
                     if self.keys.is_empty() {
                         ui.weak("No keys loaded.");
@@ -345,7 +345,7 @@ ui.add_space(10.0);
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
 ui.add_space(6.0);
-ui.label(RichText::new("Keys are kept only while rooste-ssh runs.").small().weak());
+ui.label(RichText::new("Keys are kept only while Rooste SSH runs.").small().weak());
 crate::dialogs::footer(ui, |ui| {
     if ui.button("Close").clicked() {
         decision = Decision::Cancel;
