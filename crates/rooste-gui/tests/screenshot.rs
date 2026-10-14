@@ -194,14 +194,19 @@ fn render_dialogs() {
     };
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
     std::fs::create_dir_all(&out).unwrap();
-    let shots: [(&str, &[&str]); 4] = [
+    let shots: [(&str, &[&str]); 5] = [
         ("welcome", &[]),
+        ("welcome-light", &[]),
         ("profile-editor", &["Session", "New session…"]),
         ("settings", &["Session", "Settings…"]),
         ("key-generator", &["Tools", "Key generator…"]),
     ];
     for (name, clicks) in shots {
-        let app = RoosteApp::with_config(config.clone(), None, Arc::new(MemoryStore::default()));
+        let mut config = config.clone();
+        if name.ends_with("-light") {
+            config.settings.theme = rooste_core::Theme::Light;
+        }
+        let app = RoosteApp::with_config(config, None, Arc::new(MemoryStore::default()));
         let mut harness = Harness::builder()
             .with_size([1000.0, 640.0])
             .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);

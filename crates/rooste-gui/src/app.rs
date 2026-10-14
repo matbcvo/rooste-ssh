@@ -894,8 +894,10 @@ impl RoosteApp {
             }
         }
 
+        // No margin (tabs reach the edges), but the theme's background: the
+        // window behind it is nearly black.
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
+            .frame(egui::Frame::NONE.fill(ctx.global_style().visuals.panel_fill))
             .show(ui, |ui| {
                 if self.tree.is_empty() {
                     self.welcome(ui);
