@@ -42,6 +42,9 @@ pub struct Settings {
     pub download_dir: String,
     /// The folder last chosen with "Download to…"; empty if none.
     pub last_download_to: String,
+    /// Folder where every session's output is saved as text; empty means
+    /// sessions are only logged when asked.
+    pub log_dir: String,
     /// Offer the built-in agent's keys to rooste-ssh's own sessions.
     pub use_builtin_agent: bool,
     /// Ask GitHub for a newer release at startup.
@@ -60,6 +63,7 @@ impl Default for Settings {
             auto_reconnect: true,
             download_dir: String::new(),
             last_download_to: String::new(),
+            log_dir: String::new(),
             use_builtin_agent: false,
             check_updates: true,
         }

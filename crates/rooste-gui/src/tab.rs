@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use egui::{RichText, Ui};
 use rooste_core::Settings;
 use rooste_protocols::ssh::UnknownHostKey;
-use rooste_terminal::{Palette, SearchDirection, TermEvent, Terminal};
+use rooste_terminal::{Palette, PlainText, SearchDirection, TermEvent, Terminal};
 use tokio::sync::oneshot;
 
 use crate::files::FilesPanel;
@@ -55,6 +55,61 @@ pub enum TabAction {
     RememberDownloadFolder(std::path::PathBuf),
 }
 
+/// A file receiving a tab's output as plain text.
+#[derive(Debug)]
+pub struct SessionLog {
+    pub path: std::path::PathBuf,
+    file: std::io::BufWriter<std::fs::File>,
+    text: PlainText,
+}
+
+impl SessionLog {
+    /// Open (or append to) `path` and write a header line.
+    fn open(path: &std::path::Path, session: &str) -> std::io::Result<Self> {
+        use std::io::Write;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        let mut log = Self {
+            path: path.to_owned(),
+            file: std::io::BufWriter::new(file),
+            text: PlainText::new(),
+        };
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        writeln!(log.file, "=== {session}, {now} ===")?;
+        log.file.flush()?;
+        Ok(log)
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        use std::io::Write;
+        let text = self.text.convert(bytes);
+        self.file.write_all(text.as_bytes())?;
+        self.file.flush()
+    }
+}
+
+/// A file name for a new log of session `name`, such as
+/// `web-1 2026-10-14 15-30-00.log`.
+pub fn log_file_name(name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || " -_.@".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let now = chrono::Local::now().format("%Y-%m-%d %H-%M-%S");
+    format!("{} {now}.log", safe.trim())
+}
+
 /// The find bar's state.
 #[derive(Debug, Default)]
 pub struct FindBar {
@@ -92,6 +147,8 @@ pub struct SessionTab {
     pub prompt: Option<PendingPrompt>,
     /// The find bar above the terminal, when open.
     pub find: Option<FindBar>,
+    /// The session log, while the tab's output is being saved.
+    pub log: Option<SessionLog>,
     /// The SFTP side panel, when shown.
     pub files: Option<FilesPanel>,
     download_dir: std::path::PathBuf,
@@ -103,7 +160,7 @@ pub struct SessionTab {
     remote_size: (u16, u16),
     reconnects: u32,
     runtime: tokio::runtime::Handle,
-    ctx: egui::Context,
+    pub(crate) ctx: egui::Context,
     actions: Vec<TabAction>,
 }
 
@@ -118,7 +175,10 @@ impl SessionTab {
         let mut view = TerminalView::default();
         theme::apply_to_view(&mut view, settings);
         static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        Self {
+        let log_dir = settings.log_dir.trim();
+        let log_path = (!log_dir.is_empty())
+            .then(|| rooste_core::expand_tilde(log_dir).join(log_file_name(&name)));
+        let mut tab = Self {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             name,
             remote_title: None,
@@ -142,6 +202,7 @@ impl SessionTab {
             failure: None,
             prompt: None,
             find: None,
+            log: None,
             files: None,
             download_dir: crate::theme::download_dir(settings),
             recent_download_dir: crate::theme::recent_download_dir(settings),
@@ -150,7 +211,11 @@ impl SessionTab {
             runtime: runtime.clone(),
             ctx: ctx.clone(),
             actions: Vec::new(),
+        };
+        if let Some(path) = log_path {
+            tab.start_log(&path);
         }
+        tab
     }
 
     fn spawn(
@@ -321,7 +386,8 @@ impl SessionTab {
             ""
         };
         let broadcast = if self.broadcast { "📢 " } else { "" };
-        format!("{marker}{legacy}{broadcast}{}", self.name)
+        let logging = if self.log.is_some() { "⏺ " } else { "" };
+        format!("{marker}{legacy}{broadcast}{logging}{}", self.name)
     }
 
     /// The session failed or closed.
@@ -377,6 +443,18 @@ impl SessionTab {
             self.terminal.scroll_to_bottom();
             self.session.send(SessionCommand::Input(bytes));
         }
+    }
+
+    /// Save the tab's output from now on to `path` (appending).
+    pub fn start_log(&mut self, path: &std::path::Path) {
+        match SessionLog::open(path, &self.name) {
+            Ok(log) => self.log = Some(log),
+            Err(e) => self.note(&format!("Could not log to {}: {e}", path.display())),
+        }
+    }
+
+    pub fn stop_log(&mut self) {
+        self.log = None;
     }
 
     fn note(&mut self, text: &str) {
@@ -453,7 +531,16 @@ impl SessionTab {
                     }
                 }
                 SessionEvent::Tunnels(statuses) => self.tunnels = statuses,
-                SessionEvent::Output(bytes) => self.terminal.advance(&bytes),
+                SessionEvent::Output(bytes) => {
+                    self.terminal.advance(&bytes);
+                    if let Some(log) = &mut self.log
+                        && let Err(e) = log.write(&bytes)
+                    {
+                        let path = log.path.display().to_string();
+                        self.log = None;
+                        self.note(&format!("Stopped logging to {path}: {e}"));
+                    }
+                }
                 SessionEvent::Closed { exit_status } => {
                     self.prompt = None;
                     self.state = TabState::Closed(exit_status)
