@@ -521,16 +521,39 @@ pub fn prompt(
     Modal::new(Id::new("secret-prompt"))
         .frame(crate::theme::dialog_frame(ctx))
         .show(ctx, |ui| {
-            let (heading, label) = match kind {
-                PromptKind::Password { user, host } => {
-                    ("Password", format!("Password for {user}@{host}"))
-                }
-                PromptKind::Passphrase { key_file } => (
-                    "Key passphrase",
-                    format!("Passphrase for key {}", key_file.display()),
+            let (heading, label, hidden) = match kind {
+                PromptKind::Password { user, host } => (
+                    "Password".to_owned(),
+                    format!("Password for {user}@{host}"),
+                    true,
                 ),
+                PromptKind::Passphrase { key_file } => (
+                    "Key passphrase".to_owned(),
+                    format!("Passphrase for key {}", key_file.display()),
+                    true,
+                ),
+                PromptKind::Interactive {
+                    user,
+                    host,
+                    name,
+                    prompt,
+                    echo,
+                    ..
+                } => {
+                    let heading = if name.trim().is_empty() {
+                        format!("Log in to {user}@{host}")
+                    } else {
+                        name.trim().to_owned()
+                    };
+                    (heading, prompt.trim_end_matches(':').to_owned(), !echo)
+                }
             };
             ui.heading(heading);
+            if let PromptKind::Interactive { instructions, .. } = kind
+                && !instructions.trim().is_empty()
+            {
+                ui.label(instructions.trim());
+            }
             if retry {
                 ui.colored_label(
                     ui.visuals().error_fg_color,
@@ -542,7 +565,7 @@ pub fn prompt(
                 .add(
                     egui::TextEdit::singleline(input)
                         .margin(crate::theme::FIELD_MARGIN)
-                        .password(true)
+                        .password(hidden)
                         .desired_width(280.0),
                 )
                 .labelled_by(label.id);

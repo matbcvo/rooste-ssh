@@ -193,6 +193,48 @@ impl Auth {
     }
 }
 
+/// A login method a server accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthMethod {
+    Password,
+    PublicKey,
+    KeyboardInteractive,
+    Other,
+}
+
+fn auth_methods(set: &russh::MethodSet) -> Vec<AuthMethod> {
+    set.iter()
+        .map(|kind| match kind {
+            russh::MethodKind::Password => AuthMethod::Password,
+            russh::MethodKind::PublicKey => AuthMethod::PublicKey,
+            russh::MethodKind::KeyboardInteractive => AuthMethod::KeyboardInteractive,
+            _ => AuthMethod::Other,
+        })
+        .collect()
+}
+
+/// One question in a keyboard-interactive login.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InteractivePrompt {
+    pub prompt: String,
+    /// Whether the answer may be shown as typed (false for passwords).
+    pub echo: bool,
+}
+
+/// Where a keyboard-interactive login stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InteractiveStep {
+    Success,
+    Failure,
+    /// The server asks these questions; answer them with
+    /// [`SshClient::keyboard_interactive_respond`]. There may be none.
+    Prompts {
+        name: String,
+        instructions: String,
+        prompts: Vec<InteractivePrompt>,
+    },
+}
+
 impl fmt::Debug for Auth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -449,6 +491,7 @@ impl Parts {
             allow_legacy_algorithms: config.allow_legacy_algorithms,
             routes: self.routes,
             agent: self.agent,
+            remaining_methods: None,
             _via: via,
         })
     }
@@ -485,6 +528,8 @@ pub struct SshClient {
     allow_legacy_algorithms: bool,
     routes: Routes,
     agent: Arc<Mutex<Option<AgentSource>>>,
+    /// Login methods the server still accepts, from its last rejection.
+    remaining_methods: Option<Vec<AuthMethod>>,
     /// Jump host this connection is tunneled through.
     _via: Option<Box<SshClient>>,
 }
@@ -502,21 +547,103 @@ impl SshClient {
     /// rejected it, so the caller can try the next method.
     pub async fn authenticate(&mut self, user: &str, auth: &Auth) -> Result<bool, SshError> {
         match auth {
-            Auth::Password(password) => Ok(self
-                .handle_mut()?
-                .authenticate_password(user, password.as_str())
-                .await?
-                .success()),
+            Auth::Password(password) => {
+                let result = self
+                    .handle_mut()?
+                    .authenticate_password(user, password.as_str())
+                    .await?;
+                Ok(self.record(result))
+            }
             Auth::PublicKey(key) => {
                 let hash = self.rsa_hash(key.algorithm()).await?;
                 let key = PrivateKeyWithHashAlg::new(key.clone(), hash);
-                Ok(self
-                    .handle_mut()?
-                    .authenticate_publickey(user, key)
-                    .await?
-                    .success())
+                let result = self.handle_mut()?.authenticate_publickey(user, key).await?;
+                Ok(self.record(result))
             }
             Auth::Agent(source) => self.authenticate_agent(user, source).await,
+        }
+    }
+
+    /// Remember which methods a rejection left; true on success.
+    fn record(&mut self, result: client::AuthResult) -> bool {
+        match result {
+            client::AuthResult::Success => true,
+            client::AuthResult::Failure {
+                remaining_methods, ..
+            } => {
+                self.remaining_methods = Some(auth_methods(&remaining_methods));
+                false
+            }
+        }
+    }
+
+    /// The login methods the server accepts for `user`, asking the server
+    /// if no login attempt has told us yet. `None` if that question logged
+    /// the user in (the server needs no credentials).
+    pub async fn auth_methods(&mut self, user: &str) -> Result<Option<Vec<AuthMethod>>, SshError> {
+        if let Some(methods) = &self.remaining_methods {
+            return Ok(Some(methods.clone()));
+        }
+        let result = self.handle_mut()?.authenticate_none(user).await?;
+        if self.record(result) {
+            return Ok(None);
+        }
+        Ok(self.remaining_methods.clone())
+    }
+
+    /// Start a keyboard-interactive login (prompts chosen by the server,
+    /// e.g. a password and then a one-time code).
+    pub async fn keyboard_interactive_start(
+        &mut self,
+        user: &str,
+    ) -> Result<InteractiveStep, SshError> {
+        let reply = self
+            .handle_mut()?
+            .authenticate_keyboard_interactive_start(user, None)
+            .await?;
+        Ok(self.interactive_step(reply))
+    }
+
+    /// Answer the prompts of the last [`InteractiveStep::Prompts`], in order.
+    pub async fn keyboard_interactive_respond(
+        &mut self,
+        answers: Vec<String>,
+    ) -> Result<InteractiveStep, SshError> {
+        let reply = self
+            .handle_mut()?
+            .authenticate_keyboard_interactive_respond(answers)
+            .await?;
+        Ok(self.interactive_step(reply))
+    }
+
+    fn interactive_step(
+        &mut self,
+        reply: client::KeyboardInteractiveAuthResponse,
+    ) -> InteractiveStep {
+        use client::KeyboardInteractiveAuthResponse as Reply;
+        match reply {
+            Reply::Success => InteractiveStep::Success,
+            Reply::Failure {
+                remaining_methods, ..
+            } => {
+                self.remaining_methods = Some(auth_methods(&remaining_methods));
+                InteractiveStep::Failure
+            }
+            Reply::InfoRequest {
+                name,
+                instructions,
+                prompts,
+            } => InteractiveStep::Prompts {
+                name,
+                instructions,
+                prompts: prompts
+                    .into_iter()
+                    .map(|p| InteractivePrompt {
+                        prompt: p.prompt,
+                        echo: p.echo,
+                    })
+                    .collect(),
+            },
         }
     }
 
@@ -538,7 +665,7 @@ impl SshClient {
                 .authenticate_publickey_with(user, key, hash, &mut agent)
                 .await
                 .map_err(|e| SshError::Agent(e.to_string()))?;
-            if result.success() {
+            if self.record(result) {
                 return Ok(true);
             }
         }

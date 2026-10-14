@@ -28,7 +28,7 @@ use russh::{Channel, ChannelId, ChannelOpenFailure, Preferred, Pty};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 
-use crate::{TEST_PASSWORD, TEST_USER, private_key, public_key};
+use crate::{TEST_CODE, TEST_PASSWORD, TEST_USER, private_key, public_key};
 
 /// A running in-process SSH server. Stops when dropped.
 #[derive(Debug)]
@@ -49,7 +49,29 @@ impl TestServer {
     /// Start a server offering only the given algorithms, e.g. to emulate a
     /// legacy device.
     pub async fn start_with(preferred: Preferred) -> Self {
+        Self::start_inner(preferred, false).await
+    }
+
+    /// Start a server that refuses password logins and asks through
+    /// keyboard-interactive for the password ("Password: ", hidden) and
+    /// then [`TEST_CODE`] ("Verification code: ", shown), like servers
+    /// with two-factor login. Public keys still work.
+    pub async fn start_keyboard_interactive() -> Self {
+        Self::start_inner(Preferred::default(), true).await
+    }
+
+    async fn start_inner(preferred: Preferred, interactive: bool) -> Self {
         let host_key = private_key("host_ed25519");
+        let methods = if interactive {
+            russh::MethodSet::from(
+                &[
+                    russh::MethodKind::PublicKey,
+                    russh::MethodKind::KeyboardInteractive,
+                ][..],
+            )
+        } else {
+            russh::MethodSet::from(&[russh::MethodKind::PublicKey, russh::MethodKind::Password][..])
+        };
         let host_public = host_key.public_key().clone();
         let config = Arc::new(server::Config {
             keys: vec![host_key],
@@ -57,6 +79,7 @@ impl TestServer {
             auth_rejection_time: Duration::ZERO,
             auth_rejection_time_initial: Some(Duration::ZERO),
             inactivity_timeout: Some(Duration::from_secs(60)),
+            methods,
             ..Default::default()
         });
         let authorized: Arc<[PublicKey]> = ["id_ed25519", "id_ed25519_encrypted", "id_rsa"]
@@ -80,6 +103,8 @@ impl TestServer {
                     forwards: Vec::new(),
                     channels: HashMap::new(),
                     sftp_root: root.clone(),
+                    interactive,
+                    interactive_step: 0,
                 };
                 let tracked = tracked.clone();
                 tokio::spawn(async move {
@@ -147,6 +172,10 @@ struct ShellHandler {
     /// Session channels, kept until a subsystem takes one over.
     channels: HashMap<ChannelId, Channel<Msg>>,
     sftp_root: PathBuf,
+    /// Password logins go through keyboard-interactive, with a code.
+    interactive: bool,
+    /// Keyboard-interactive questions answered correctly so far.
+    interactive_step: u8,
 }
 
 impl Drop for ShellHandler {
@@ -213,7 +242,48 @@ impl ShellHandler {
 impl server::Handler for ShellHandler {
     type Error = russh::Error;
 
+    async fn auth_keyboard_interactive<'a>(
+        &'a mut self,
+        user: &str,
+        _submethods: &str,
+        response: Option<server::Response<'a>>,
+    ) -> Result<Auth, Self::Error> {
+        if !self.interactive || user != TEST_USER {
+            return Ok(Auth::reject());
+        }
+        let answer = response.and_then(|mut r| r.next());
+        let expected = match self.interactive_step {
+            0 if answer.is_none() => {
+                self.interactive_step = 1;
+                return Ok(Auth::Partial {
+                    name: "".into(),
+                    instructions: "".into(),
+                    prompts: vec![("Password: ".into(), false)].into(),
+                });
+            }
+            1 => TEST_PASSWORD,
+            _ => TEST_CODE,
+        };
+        if answer.as_deref() != Some(expected.as_bytes()) {
+            self.interactive_step = 0;
+            return Ok(Auth::reject());
+        }
+        if self.interactive_step == 1 {
+            self.interactive_step = 2;
+            return Ok(Auth::Partial {
+                name: "Two-factor login".into(),
+                instructions: "Enter the code from your app.".into(),
+                prompts: vec![("Verification code: ".into(), true)].into(),
+            });
+        }
+        self.user = user.to_owned();
+        Ok(Auth::Accept)
+    }
+
     async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
+        if self.interactive {
+            return Ok(Auth::reject());
+        }
         if user == TEST_USER && password == TEST_PASSWORD {
             self.user = user.to_owned();
             return Ok(Auth::Accept);

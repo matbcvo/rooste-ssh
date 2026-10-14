@@ -38,7 +38,8 @@ cargo run -p rooste-cli -- -J bastion -L 5432:db:5432 -N user@host   # jump host
 ```
 
 `rooste-cli` tries the SSH agent, then `~/.ssh/id_ed25519`, `id_ecdsa` and `id_rsa` (or keys given
-with `-i`), then asks for a password. Unknown host keys are confirmed interactively and saved to
+with `-i`), then answers the server's questions (keyboard-interactive: a password, one-time codes)
+or asks for a password. Unknown host keys are confirmed interactively and saved to
 `~/.ssh/known_hosts`. Run `rooste-cli --help` for all options.
 
 ## Configuration

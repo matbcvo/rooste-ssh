@@ -9,8 +9,9 @@ use futures::future::BoxFuture;
 use rooste_core::{Destination, Protocol, SerialSettings, Tunnel, TunnelKind};
 use rooste_protocols::Transport;
 use rooste_protocols::ssh::{
-    AgentSource, Auth, Forward, HostKeyPolicy, HostKeyPrompt, PtyRequest, SshClient, SshConfig,
-    SshError, UnknownHostKey, connect, connect_via, load_private_key,
+    AgentSource, Auth, AuthMethod, Forward, HostKeyPolicy, HostKeyPrompt, InteractiveStep,
+    PtyRequest, SshClient, SshConfig, SshError, UnknownHostKey, connect, connect_via,
+    load_private_key,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -103,8 +104,25 @@ pub struct TunnelStatus {
 /// What a prompt asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptKind {
-    Password { user: String, host: String },
-    Passphrase { key_file: PathBuf },
+    Password {
+        user: String,
+        host: String,
+    },
+    Passphrase {
+        key_file: PathBuf,
+    },
+    /// A question from the server in a keyboard-interactive login, such as
+    /// a password or a one-time code.
+    Interactive {
+        user: String,
+        host: String,
+        /// The server's title and instructions for this step (may be empty).
+        name: String,
+        instructions: String,
+        prompt: String,
+        /// Whether the answer may be shown as typed.
+        echo: bool,
+    },
 }
 
 const PROMPT_ATTEMPTS: usize = 3;
@@ -532,6 +550,22 @@ async fn authenticate(
         return Ok(true);
     }
 
+    // Like OpenSSH, prefer keyboard-interactive (which also covers one-time
+    // codes) over plain passwords when the server offers both.
+    let Some(methods) = client.auth_methods(user).await.map_err(describe)? else {
+        return Ok(true);
+    };
+    if methods.contains(&AuthMethod::KeyboardInteractive) {
+        match keyboard_interactive(client, login, request, sink).await? {
+            Some(true) => return Ok(true),
+            Some(false) => {}
+            None => return Err("Login cancelled".into()),
+        }
+    }
+    if !methods.contains(&AuthMethod::Password) {
+        return Ok(false);
+    }
+
     let mut retry = false;
     if let Some(password) = login.password {
         if try_password(client, user, password).await? {
@@ -559,6 +593,80 @@ async fn authenticate(
         retry = true;
     }
     Ok(false)
+}
+
+/// Log in by answering the server's questions. A saved password answers
+/// the first hidden question that asks for a password; everything else is
+/// asked in the UI. `None` if the user cancels.
+async fn keyboard_interactive(
+    client: &mut SshClient,
+    login: &Login<'_>,
+    request: &ConnectRequest,
+    sink: &EventSink,
+) -> Result<Option<bool>, String> {
+    let user = login.user;
+    let mut saved = login.password;
+    for attempt in 0..PROMPT_ATTEMPTS {
+        let mut retry = attempt > 0;
+        let mut typed_password = None;
+        let mut step = client
+            .keyboard_interactive_start(user)
+            .await
+            .map_err(describe)?;
+        // Servers may ask several rounds of questions; don't loop forever.
+        for _ in 0..10 {
+            let (name, instructions, prompts) = match step {
+                InteractiveStep::Prompts {
+                    name,
+                    instructions,
+                    prompts,
+                } => (name, instructions, prompts),
+                done => {
+                    step = done;
+                    break;
+                }
+            };
+            let mut answers = Vec::with_capacity(prompts.len());
+            for question in prompts {
+                let asks_password =
+                    !question.echo && question.prompt.to_lowercase().contains("password");
+                if asks_password && let Some(password) = saved.take() {
+                    answers.push(password.to_owned());
+                    continue;
+                }
+                if !request.prompt_for_password {
+                    return Ok(Some(false));
+                }
+                let kind = PromptKind::Interactive {
+                    user: user.to_owned(),
+                    host: login.host.to_owned(),
+                    name: name.clone(),
+                    instructions: instructions.clone(),
+                    prompt: question.prompt.trim_end().to_owned(),
+                    echo: question.echo,
+                };
+                let Some(answer) = prompt(sink, kind, retry).await else {
+                    return Ok(None);
+                };
+                retry = false;
+                if asks_password {
+                    typed_password = Some(answer.clone());
+                }
+                answers.push(answer);
+            }
+            step = client
+                .keyboard_interactive_respond(answers)
+                .await
+                .map_err(describe)?;
+        }
+        if step == InteractiveStep::Success {
+            if let (true, Some(password)) = (login.target, typed_password) {
+                sink.send(SessionEvent::PasswordAccepted(password));
+            }
+            return Ok(Some(true));
+        }
+    }
+    Ok(Some(false))
 }
 
 async fn try_password(
