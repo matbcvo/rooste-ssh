@@ -3,8 +3,8 @@
 A modern, memory-safe SSH client for Linux and Windows, written in Rust — with tabs, split panes,
 a session manager, built-in SFTP, key generator and agent.
 
-> **Status:** early development — M2 is done: a desktop app with a working terminal and a
-> command-line client. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** early development — M3 is done: a usable desktop app with saved sessions, tabs,
+> imports from PuTTY and `~/.ssh/config`, and a command-line client. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Building
 
@@ -25,6 +25,14 @@ cargo run -p rooste-cli -- user@host ls    # run a command
 `rooste-cli` tries the SSH agent, then `~/.ssh/id_ed25519`, `id_ecdsa` and `id_rsa` (or keys given
 with `-i`), then asks for a password. Unknown host keys are confirmed interactively and saved to
 `~/.ssh/known_hosts`. Run `rooste-cli --help` for all options.
+
+## Configuration
+
+Settings and saved sessions are stored in `config.toml` in the platform config directory
+(`~/.config/rooste-ssh/` on Linux, `%APPDATA%\rooste-ssh\` on Windows). To run portably,
+for example from a USB stick, put an empty file named `portable` next to the executable; the
+configuration is then kept in `rooste.toml` beside it. Saved passwords go to the system keyring,
+never into the configuration file.
 
 ## Testing
 

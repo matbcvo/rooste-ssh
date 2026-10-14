@@ -27,6 +27,8 @@ pub struct ViewOutput {
 #[derive(Debug)]
 pub struct TerminalView {
     pub font_size: f32,
+    /// Copy the selection to the clipboard when the mouse button is released.
+    pub copy_on_select: bool,
     keys: KeyTranslator,
     /// Fractional wheel lines not yet scrolled.
     scroll_accum: f32,
@@ -41,6 +43,7 @@ impl Default for TerminalView {
     fn default() -> Self {
         Self {
             font_size: 14.0,
+            copy_on_select: true,
             keys: KeyTranslator::default(),
             scroll_accum: 0.0,
             clicks: 0,
@@ -231,10 +234,10 @@ impl TerminalView {
                         (MouseButton::Left, false) => {
                             self.selecting = false;
                             // Copy on select, as PuTTY does.
-                            if let Some(text) = term.selection_text() {
-                                ui.ctx().copy_text(text);
-                            } else {
-                                term.clear_selection();
+                            match term.selection_text() {
+                                Some(text) if self.copy_on_select => ui.ctx().copy_text(text),
+                                Some(_) => {}
+                                None => term.clear_selection(),
                             }
                         }
                         // Right or middle click pastes, as PuTTY does.

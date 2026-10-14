@@ -1,110 +1,22 @@
-//! The application window.
+//! The application window: menu, session manager, tabs and dialogs.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use egui::{Align, Layout, RichText, Ui};
-use rooste_proto::ssh::UnknownHostKey;
-use rooste_term::{TermEvent, Terminal};
-use tokio::sync::oneshot;
+use egui::{RichText, Ui};
+use egui_tiles::{Container, SimplificationOptions, Tile, TileId, Tree, UiResponse};
+use rooste_core::import::{putty, ssh_config};
+use rooste_core::{Config, ConfigLocation, Profile, Protocol, SecretStore, Settings, Theme};
 
-use crate::session::{ConnectRequest, Session, SessionCommand, SessionEvent};
-use crate::terminal_view::TerminalView;
+use crate::dialogs::{self, Decision, ProfileEditor, SettingsEditor};
+use crate::manager::{self, ManagerAction, ManagerState};
+use crate::session::ConnectRequest;
+use crate::tab::{SessionTab, TabAction};
+use crate::theme;
 
-/// Connection state of a tab.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TabState {
-    Connecting(String),
-    Connected,
-    Closed(Option<u32>),
-    Failed(String),
-}
+pub use crate::tab::TabState;
 
-/// One terminal session.
-#[derive(Debug)]
-pub struct SessionTab {
-    pub title: String,
-    pub state: TabState,
-    pub terminal: Terminal,
-    view: TerminalView,
-    session: Session,
-    request: ConnectRequest,
-    host_key: Option<(UnknownHostKey, oneshot::Sender<bool>)>,
-    /// Grid size the server was last told about.
-    remote_size: (u16, u16),
-}
-
-impl SessionTab {
-    fn open(
-        runtime: &tokio::runtime::Handle,
-        ctx: &egui::Context,
-        request: ConnectRequest,
-    ) -> Self {
-        let wake_ctx = ctx.clone();
-        let session = Session::spawn(runtime, request.clone(), move || wake_ctx.request_repaint());
-        Self {
-            title: format!("{}@{}", request.user, request.host),
-            state: TabState::Connecting("Connecting…".into()),
-            terminal: Terminal::new(request.cols.max(1), request.rows.max(1)),
-            view: TerminalView::default(),
-            session,
-            remote_size: (request.cols.max(1), request.rows.max(1)),
-            request,
-            host_key: None,
-        }
-    }
-
-    /// The host key waiting for the user's decision, if any.
-    pub fn pending_host_key(&self) -> Option<&UnknownHostKey> {
-        self.host_key.as_ref().map(|(key, _)| key)
-    }
-
-    fn answer_host_key(&mut self, trust: bool) {
-        if let Some((_, reply)) = self.host_key.take() {
-            let _ = reply.send(trust);
-        }
-    }
-
-    fn poll(&mut self, ctx: &egui::Context) {
-        for event in self.session.poll() {
-            match event {
-                SessionEvent::Status(text) => self.state = TabState::Connecting(text),
-                SessionEvent::HostKey { key, reply } => self.host_key = Some((key, reply)),
-                SessionEvent::Connected => self.state = TabState::Connected,
-                SessionEvent::Output(bytes) => self.terminal.advance(&bytes),
-                SessionEvent::Closed { exit_status } => self.state = TabState::Closed(exit_status),
-                SessionEvent::Failed(message) => self.state = TabState::Failed(message),
-            }
-        }
-        for event in self.terminal.take_events() {
-            match event {
-                TermEvent::Reply(bytes) => self.session.send(SessionCommand::Input(bytes)),
-                TermEvent::Title(title) => self.title = title,
-                TermEvent::ResetTitle => {
-                    self.title = format!("{}@{}", self.request.user, self.request.host)
-                }
-                TermEvent::Clipboard(text) => ctx.copy_text(text),
-                TermEvent::Bell => {}
-            }
-        }
-    }
-
-    fn status_text(&self) -> String {
-        match &self.state {
-            TabState::Connecting(text) => text.clone(),
-            TabState::Connected => "Connected".into(),
-            TabState::Closed(Some(code)) => format!("Session closed (exit status {code})"),
-            TabState::Closed(None) => "Session closed".into(),
-            TabState::Failed(message) => message.clone(),
-        }
-    }
-
-    fn close(&mut self) {
-        self.answer_host_key(false);
-        self.session.send(SessionCommand::Close);
-    }
-}
-
-/// Fields of the "new connection" form.
+/// Fields of the quick-connect form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectForm {
     pub host: String,
@@ -112,7 +24,6 @@ pub struct ConnectForm {
     pub user: String,
     pub password: String,
     pub key_file: String,
-    pub key_passphrase: String,
     pub use_agent: bool,
     pub allow_legacy: bool,
 }
@@ -127,7 +38,6 @@ impl Default for ConnectForm {
                 .unwrap_or_default(),
             password: String::new(),
             key_file: String::new(),
-            key_passphrase: String::new(),
             use_agent: true,
             allow_legacy: false,
         }
@@ -158,43 +68,138 @@ impl ConnectForm {
             port,
             user: user.to_owned(),
             password: non_empty(&self.password),
-            key_file: non_empty(self.key_file.trim()).map(PathBuf::from),
-            key_passphrase: non_empty(&self.key_passphrase),
+            key_file: non_empty(self.key_file.trim()).map(|p| rooste_core::expand_tilde(&p)),
+            key_passphrase: None,
             use_agent: self.use_agent,
             allow_legacy: self.allow_legacy,
             known_hosts: None,
             cols: 80,
             rows: 24,
+            prompt_for_password: true,
         })
+    }
+}
+
+/// An open dialog.
+#[derive(Debug)]
+pub enum Dialog {
+    EditProfile(Box<ProfileEditor>),
+    Settings(SettingsEditor),
+    DeleteProfile(String),
+    CloseTab(TileId),
+    QuickConnect,
+}
+
+/// A message in the status bar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notice {
+    pub text: String,
+    pub error: bool,
+}
+
+/// Where imports read from; overridable for tests.
+#[derive(Debug, Clone, Default)]
+pub struct ImportSources {
+    pub putty_dir: Option<PathBuf>,
+    pub ssh_config: Option<PathBuf>,
+}
+
+struct TabBehavior {
+    close_requests: Vec<TileId>,
+}
+
+impl egui_tiles::Behavior<SessionTab> for TabBehavior {
+    fn pane_ui(&mut self, ui: &mut Ui, _tile_id: TileId, tab: &mut SessionTab) -> UiResponse {
+        tab.ui(ui);
+        UiResponse::None
+    }
+
+    fn tab_title_for_pane(&mut self, tab: &SessionTab) -> egui::WidgetText {
+        tab.title().into()
+    }
+
+    fn is_tab_closable(&self, _tiles: &egui_tiles::Tiles<SessionTab>, _tile_id: TileId) -> bool {
+        true
+    }
+
+    fn on_tab_close(
+        &mut self,
+        _tiles: &mut egui_tiles::Tiles<SessionTab>,
+        tile_id: TileId,
+    ) -> bool {
+        // Closing is decided by the app (it may ask first).
+        self.close_requests.push(tile_id);
+        false
+    }
+
+    fn simplification_options(&self) -> SimplificationOptions {
+        SimplificationOptions {
+            all_panes_must_have_tabs: true,
+            ..SimplificationOptions::default()
+        }
     }
 }
 
 /// The rooste-ssh application.
 pub struct RoosteApp {
     runtime: tokio::runtime::Runtime,
-    pub form: ConnectForm,
-    pub form_error: Option<String>,
-    pub tab: Option<SessionTab>,
+    pub config: Config,
+    config_path: Option<PathBuf>,
+    secrets: Arc<dyn SecretStore>,
+    pub tree: Tree<SessionTab>,
+    pub manager: ManagerState,
+    pub dialog: Option<Dialog>,
+    pub quick: ConnectForm,
+    pub quick_error: Option<String>,
+    pub notice: Option<Notice>,
+    pub show_manager: bool,
     known_hosts: Option<PathBuf>,
+    imports: ImportSources,
     window_title: String,
+    applied_theme: Option<Theme>,
 }
 
 impl std::fmt::Debug for RoosteApp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RoosteApp")
-            .field("tab", &self.tab)
+            .field(
+                "tabs",
+                &self.tabs().map(|t| (&t.name, &t.state)).collect::<Vec<_>>(),
+            )
+            .field("dialog", &self.dialog)
+            .field("notice", &self.notice)
             .finish_non_exhaustive()
     }
 }
 
-impl Default for RoosteApp {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl RoosteApp {
+    /// The app with the user's configuration and the OS credential store.
     pub fn new() -> Self {
+        let location = ConfigLocation::detect();
+        let (config, path, notice) = match Config::load(&location.path) {
+            Ok(config) => (config, Some(location.path), None),
+            Err(e) => (
+                Config::default(),
+                // Do not overwrite a file we could not read.
+                None,
+                Some(Notice {
+                    text: format!("{e}; changes will not be saved"),
+                    error: true,
+                }),
+            ),
+        };
+        let mut app = Self::with_config(config, path, Arc::new(crate::secrets::KeyringStore));
+        app.notice = notice;
+        app
+    }
+
+    /// An app with the given configuration. `config_path` of `None` keeps
+    /// changes in memory only.
+    pub fn with_config(
+        config: Config,
+        config_path: Option<PathBuf>,
+        secrets: Arc<dyn SecretStore>,
+    ) -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("rooste-net")
@@ -203,11 +208,20 @@ impl RoosteApp {
             .expect("start tokio runtime");
         Self {
             runtime,
-            form: ConnectForm::default(),
-            form_error: None,
-            tab: None,
+            config,
+            config_path,
+            secrets,
+            tree: Tree::empty("tabs"),
+            manager: ManagerState::default(),
+            dialog: None,
+            quick: ConnectForm::default(),
+            quick_error: None,
+            notice: None,
+            show_manager: true,
             known_hosts: None,
+            imports: ImportSources::default(),
             window_title: String::new(),
+            applied_theme: None,
         }
     }
 
@@ -217,36 +231,588 @@ impl RoosteApp {
         self
     }
 
-    fn connect(&mut self, ctx: &egui::Context) {
-        match self.form.request() {
+    pub fn with_import_sources(mut self, imports: ImportSources) -> Self {
+        self.imports = imports;
+        self
+    }
+
+    pub fn secrets(&self) -> &dyn SecretStore {
+        &*self.secrets
+    }
+
+    /// All open tabs.
+    pub fn tabs(&self) -> impl Iterator<Item = &SessionTab> {
+        self.tree.tiles.tiles().filter_map(|tile| match tile {
+            Tile::Pane(tab) => Some(tab),
+            Tile::Container(_) => None,
+        })
+    }
+
+    fn tab_ids(&self) -> Vec<TileId> {
+        self.tree
+            .tiles
+            .iter()
+            .filter(|(_, tile)| matches!(tile, Tile::Pane(_)))
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    fn tab_mut(&mut self, id: TileId) -> Option<&mut SessionTab> {
+        match self.tree.tiles.get_mut(id) {
+            Some(Tile::Pane(tab)) => Some(tab),
+            _ => None,
+        }
+    }
+
+    /// The first visible tab.
+    fn active_tab_id(&self) -> Option<TileId> {
+        self.tree
+            .active_tiles()
+            .into_iter()
+            .find(|id| matches!(self.tree.tiles.get(*id), Some(Tile::Pane(_))))
+    }
+
+    fn save_config(&mut self) {
+        if let Some(path) = &self.config_path
+            && let Err(e) = self.config.save(path)
+        {
+            self.notice = Some(Notice {
+                text: e.to_string(),
+                error: true,
+            });
+        }
+    }
+
+    fn notify(&mut self, text: impl Into<String>, error: bool) {
+        self.notice = Some(Notice {
+            text: text.into(),
+            error,
+        });
+    }
+
+    fn request_for(&self, profile: &Profile) -> ConnectRequest {
+        let user = if profile.user.is_empty() {
+            self.config.settings.default_user.clone()
+        } else {
+            profile.user.clone()
+        };
+        ConnectRequest {
+            host: profile.host.clone(),
+            port: profile.effective_port(),
+            user,
+            password: profile
+                .save_password
+                .then(|| self.secrets.get(&profile.id))
+                .flatten(),
+            key_file: profile
+                .key_file
+                .as_ref()
+                .map(|p| rooste_core::expand_tilde(&p.to_string_lossy())),
+            key_passphrase: None,
+            use_agent: profile.use_agent,
+            allow_legacy: profile.allow_legacy,
+            known_hosts: self.known_hosts.clone(),
+            cols: 80,
+            rows: 24,
+            prompt_for_password: true,
+        }
+    }
+
+    /// Open a tab for a saved profile.
+    pub fn connect_profile(&mut self, ctx: &egui::Context, profile_id: &str) {
+        let Some(profile) = self.config.profile(profile_id).cloned() else {
+            return;
+        };
+        if profile.protocol != Protocol::Ssh {
+            self.notify(
+                format!(
+                    "{} connections are not supported yet; only SSH is available.",
+                    dialogs::protocol_name(profile.protocol)
+                ),
+                true,
+            );
+            return;
+        }
+        let request = self.request_for(&profile);
+        let mut tab = SessionTab::open(
+            self.runtime.handle(),
+            ctx,
+            profile.display_name(),
+            request,
+            &self.config.settings,
+        );
+        tab.profile_id = Some(profile.id.clone());
+        tab.save_password = profile.save_password;
+        self.add_tab(tab);
+    }
+
+    fn quick_connect(&mut self, ctx: &egui::Context) -> bool {
+        match self.quick.request() {
             Ok(mut request) => {
                 request.known_hosts = self.known_hosts.clone();
-                self.form_error = None;
-                self.tab = Some(SessionTab::open(self.runtime.handle(), ctx, request));
+                let name = format!("{}@{}", request.user, request.host);
+                let tab = SessionTab::open(
+                    self.runtime.handle(),
+                    ctx,
+                    name,
+                    request,
+                    &self.config.settings,
+                );
+                self.add_tab(tab);
+                self.quick_error = None;
+                self.quick.password.clear();
+                true
             }
-            Err(message) => self.form_error = Some(message),
+            Err(message) => {
+                self.quick_error = Some(message);
+                false
+            }
+        }
+    }
+
+    fn add_tab(&mut self, tab: SessionTab) {
+        let id = self.tree.tiles.insert_pane(tab);
+        let target = self
+            .active_tab_id()
+            .and_then(|active| self.tree.tiles.parent_of(active))
+            .or(self.tree.root);
+        match target.and_then(|t| self.tree.tiles.get_mut(t)) {
+            Some(Tile::Container(Container::Tabs(tabs))) => {
+                tabs.add_child(id);
+                tabs.set_active(id);
+            }
+            _ => {
+                let children = self.tree.root.into_iter().chain([id]).collect();
+                let tabs = self.tree.tiles.insert_tab_tile(children);
+                if let Some(Tile::Container(Container::Tabs(t))) = self.tree.tiles.get_mut(tabs) {
+                    t.set_active(id);
+                }
+                self.tree.root = Some(tabs);
+            }
+        }
+    }
+
+    fn request_close(&mut self, id: TileId) {
+        let confirm = self.config.settings.confirm_close;
+        match self.tab_mut(id) {
+            Some(tab) if confirm && tab.is_active() => self.dialog = Some(Dialog::CloseTab(id)),
+            Some(_) => self.close_tab(id),
+            None => {}
+        }
+    }
+
+    fn close_tab(&mut self, id: TileId) {
+        if let Some(tab) = self.tab_mut(id) {
+            tab.close();
+        }
+        self.tree.remove_recursively(id);
+    }
+
+    fn reconnect(&mut self, ctx: &egui::Context, id: TileId) {
+        let settings = self.config.settings.clone();
+        let handle = self.runtime.handle().clone();
+        if let Some(Tile::Pane(tab)) = self.tree.tiles.get_mut(id) {
+            let mut request = tab.request.clone();
+            (request.cols, request.rows) = tab.terminal.size();
+            let mut fresh = SessionTab::open(&handle, ctx, tab.name.clone(), request, &settings);
+            fresh.profile_id = tab.profile_id.clone();
+            fresh.save_password = tab.save_password;
+            *tab = fresh;
+        }
+    }
+
+    fn import(&mut self, from_putty: bool) {
+        let (source, result) = if from_putty {
+            let result = match &self.imports.putty_dir {
+                Some(dir) => putty::import_dir(dir),
+                None => putty::import_default(),
+            };
+            ("PuTTY", result)
+        } else {
+            let result = match &self.imports.ssh_config {
+                Some(path) => ssh_config::import_file(path),
+                None => ssh_config::import_default(),
+            };
+            ("~/.ssh/config", result)
+        };
+        match result {
+            Ok(profiles) => {
+                let found = profiles.len();
+                let added = self.config.merge_imported(profiles);
+                self.save_config();
+                let skipped = found - added;
+                let text = match (added, skipped) {
+                    (0, 0) => format!("No sessions found in {source}."),
+                    (added, 0) => format!("Imported {added} sessions from {source}."),
+                    (added, skipped) => format!(
+                        "Imported {added} sessions from {source} ({skipped} already existed)."
+                    ),
+                };
+                self.notify(text, false);
+            }
+            Err(e) => self.notify(format!("Could not import from {source}: {e}"), true),
+        }
+    }
+
+    fn apply_settings(&mut self, settings: Settings) {
+        self.config.settings = settings;
+        self.save_config();
+        let settings = self.config.settings.clone();
+        for (_, tile) in self.tree.tiles.iter_mut() {
+            if let Tile::Pane(tab) = tile {
+                tab.apply_settings(&settings);
+            }
+        }
+    }
+
+    fn handle_manager(&mut self, ctx: &egui::Context, action: ManagerAction) {
+        match action {
+            ManagerAction::New => {
+                let profile = Profile {
+                    user: self.config.settings.default_user.clone(),
+                    ..Profile::default()
+                };
+                self.dialog = Some(Dialog::EditProfile(Box::new(ProfileEditor::new(
+                    profile, true,
+                ))));
+            }
+            ManagerAction::Connect(id) => self.connect_profile(ctx, &id),
+            ManagerAction::Edit(id) => {
+                if let Some(profile) = self.config.profile(&id) {
+                    self.dialog = Some(Dialog::EditProfile(Box::new(ProfileEditor::new(
+                        profile.clone(),
+                        false,
+                    ))));
+                }
+            }
+            ManagerAction::Duplicate(id) => {
+                if let Some(copy) = self.config.profile(&id).map(Profile::duplicate) {
+                    self.manager.selected = Some(copy.id.clone());
+                    self.config.upsert_profile(copy);
+                    self.save_config();
+                }
+            }
+            ManagerAction::Delete(id) => self.dialog = Some(Dialog::DeleteProfile(id)),
         }
     }
 
     /// Draw one frame.
     pub fn show(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        if let Some(tab) = self.tab.as_mut() {
-            tab.poll(&ctx);
+        if self.applied_theme != Some(self.config.settings.theme) {
+            ctx.set_visuals(theme::visuals(self.config.settings.theme));
+            self.applied_theme = Some(self.config.settings.theme);
         }
-        self.update_window_title(&ctx);
 
-        if self.tab.is_some() {
-            self.session_ui(ui);
-        } else {
-            self.form_ui(ui);
+        // Session events and tab actions.
+        for id in self.tab_ids() {
+            let actions = match self.tab_mut(id) {
+                Some(tab) => {
+                    tab.poll(&ctx);
+                    tab.take_actions()
+                }
+                None => continue,
+            };
+            for action in actions {
+                match action {
+                    TabAction::Reconnect => self.reconnect(&ctx, id),
+                    TabAction::SavePassword {
+                        profile_id,
+                        password,
+                    } => {
+                        if let Err(e) = self.secrets.set(&profile_id, &password) {
+                            self.notify(e, true);
+                        }
+                    }
+                }
+            }
         }
-        self.host_key_dialog(&ctx);
+
+        self.menu_bar(ui);
+        self.status_bar(ui);
+        if self.show_manager {
+            let mut action = None;
+            egui::Panel::left("session-manager")
+                .resizable(true)
+                .default_size(240.0)
+                .show(ui, |ui| {
+                    action = manager::show(ui, &mut self.manager, &self.config.profiles);
+                });
+            if let Some(action) = action {
+                self.handle_manager(&ctx, action);
+            }
+        }
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| {
+                if self.tree.is_empty() {
+                    self.welcome(ui);
+                } else {
+                    let mut behavior = TabBehavior {
+                        close_requests: Vec::new(),
+                    };
+                    self.tree.ui(&mut behavior, ui);
+                    for id in behavior.close_requests {
+                        self.request_close(id);
+                    }
+                }
+            });
+
+        self.dialogs(&ctx);
+        self.shortcuts(&ctx);
+        self.update_window_title(&ctx);
+    }
+
+    fn menu_bar(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        egui::Panel::top("menu").show(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
+                ui.menu_button("Session", |ui| {
+                    if ui.button("New session…").clicked() {
+                        self.handle_manager(&ctx, ManagerAction::New);
+                        ui.close();
+                    }
+                    if ui.button("Quick connect…").clicked() {
+                        self.dialog = Some(Dialog::QuickConnect);
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Import from PuTTY").clicked() {
+                        self.import(true);
+                        ui.close();
+                    }
+                    if ui.button("Import from ~/.ssh/config").clicked() {
+                        self.import(false);
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Settings…").clicked() {
+                        self.dialog = Some(Dialog::Settings(SettingsEditor {
+                            settings: self.config.settings.clone(),
+                        }));
+                        ui.close();
+                    }
+                });
+                ui.menu_button("View", |ui| {
+                    if ui
+                        .checkbox(&mut self.show_manager, "Session manager")
+                        .clicked()
+                    {
+                        ui.close();
+                    }
+                });
+            });
+        });
+    }
+
+    fn status_bar(&mut self, ui: &mut Ui) {
+        let Some(notice) = self.notice.clone() else {
+            return;
+        };
+        egui::Panel::bottom("status").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if notice.error {
+                    ui.colored_label(ui.visuals().error_fg_color, &notice.text);
+                } else {
+                    ui.label(&notice.text);
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("✕").on_hover_text("Dismiss").clicked() {
+                        self.notice = None;
+                    }
+                });
+            });
+        });
+    }
+
+    fn welcome(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.add_space(24.0);
+            ui.vertical_centered(|ui| {
+                ui.heading("rooste-ssh");
+                ui.label(RichText::new("Double-click a saved session, or connect quickly:").weak());
+            });
+            ui.add_space(12.0);
+            if self.quick_form(ui) {
+                self.quick_connect(&ctx);
+            }
+        });
+    }
+
+    /// The quick-connect fields. Returns true when the user submits.
+    fn quick_form(&mut self, ui: &mut Ui) -> bool {
+        let mut submit = false;
+        egui::Grid::new("quick-connect")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                let mut field = |ui: &mut Ui, label: &str, value: &mut String, password: bool| {
+                    let label = ui.label(label);
+                    let edit = egui::TextEdit::singleline(value)
+                        .password(password)
+                        .desired_width(280.0);
+                    let response = ui.add(edit).labelled_by(label.id);
+                    submit |=
+                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    ui.end_row();
+                };
+                field(ui, "Host", &mut self.quick.host, false);
+                field(ui, "Port", &mut self.quick.port, false);
+                field(ui, "User", &mut self.quick.user, false);
+                field(ui, "Password", &mut self.quick.password, true);
+                field(ui, "Key file", &mut self.quick.key_file, false);
+                ui.label("");
+                ui.checkbox(&mut self.quick.use_agent, "Use SSH agent");
+                ui.end_row();
+                ui.label("");
+                ui.checkbox(&mut self.quick.allow_legacy, "Allow legacy algorithms")
+                    .on_hover_text("Offer outdated SHA-1 and CBC algorithms for old devices");
+                ui.end_row();
+            });
+        if let Some(error) = &self.quick_error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
+        submit | ui.button("Connect").clicked()
+    }
+
+    fn dialogs(&mut self, ctx: &egui::Context) {
+        // Host keys and prompts from sessions take priority.
+        for id in self.tab_ids() {
+            let Some(tab) = self.tab_mut(id) else {
+                continue;
+            };
+            if let Some(key) = tab.pending_host_key().cloned() {
+                match dialogs::host_key(ctx, &key) {
+                    Decision::Accept(()) => tab.answer_host_key(true),
+                    Decision::Cancel => tab.answer_host_key(false),
+                    Decision::Pending => {}
+                }
+                return;
+            }
+            if let Some(prompt) = tab.prompt.as_mut() {
+                let decision = dialogs::prompt(ctx, &prompt.kind, prompt.retry, &mut prompt.input);
+                match decision {
+                    Decision::Accept(secret) => tab.answer_prompt(Some(secret)),
+                    Decision::Cancel => tab.answer_prompt(None),
+                    Decision::Pending => {}
+                }
+                return;
+            }
+        }
+
+        let Some(mut dialog) = self.dialog.take() else {
+            return;
+        };
+        let keep = match &mut dialog {
+            Dialog::EditProfile(editor) => match editor.show(ctx, &self.config.folders()) {
+                Decision::Pending => true,
+                Decision::Cancel => false,
+                Decision::Accept((profile, password)) => {
+                    if profile.save_password && !password.is_empty() {
+                        if let Err(e) = self.secrets.set(&profile.id, &password) {
+                            self.notify(e, true);
+                        }
+                    } else if !profile.save_password {
+                        self.secrets.delete(&profile.id);
+                    }
+                    self.manager.selected = Some(profile.id.clone());
+                    self.config.upsert_profile(profile);
+                    self.save_config();
+                    false
+                }
+            },
+            Dialog::Settings(editor) => match editor.show(ctx) {
+                Decision::Pending => true,
+                Decision::Cancel => false,
+                Decision::Accept(settings) => {
+                    self.apply_settings(settings);
+                    false
+                }
+            },
+            Dialog::DeleteProfile(id) => {
+                let name = self
+                    .config
+                    .profile(id)
+                    .map(Profile::display_name)
+                    .unwrap_or_default();
+                match dialogs::confirm(
+                    ctx,
+                    "delete-profile",
+                    "Delete session",
+                    &format!("Delete the saved session \"{name}\"?"),
+                    "Delete",
+                ) {
+                    Decision::Pending => true,
+                    Decision::Cancel => false,
+                    Decision::Accept(()) => {
+                        self.secrets.delete(id);
+                        self.config.remove_profile(id);
+                        self.save_config();
+                        false
+                    }
+                }
+            }
+            Dialog::CloseTab(id) => {
+                let id = *id;
+                match dialogs::confirm(
+                    ctx,
+                    "close-tab",
+                    "Close tab",
+                    "This tab has an active connection. Close it?",
+                    "Close",
+                ) {
+                    Decision::Pending => true,
+                    Decision::Cancel => false,
+                    Decision::Accept(()) => {
+                        self.close_tab(id);
+                        false
+                    }
+                }
+            }
+            Dialog::QuickConnect => {
+                let mut keep = true;
+                egui::Modal::new(egui::Id::new("quick-connect-dialog")).show(ctx, |ui| {
+                    ui.heading("Quick connect");
+                    ui.add_space(6.0);
+                    if self.quick_form(ui) && self.quick_connect(ctx) {
+                        keep = false;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        keep = false;
+                    }
+                });
+                keep
+            }
+        };
+        if keep && self.dialog.is_none() {
+            self.dialog = Some(dialog);
+        }
+    }
+
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        use egui::{Key, KeyboardShortcut, Modifiers};
+        let ctrl_shift = Modifiers::CTRL | Modifiers::SHIFT;
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(ctrl_shift, Key::T))) {
+            self.dialog = Some(Dialog::QuickConnect);
+        }
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(ctrl_shift, Key::W)))
+            && let Some(id) = self.active_tab_id()
+        {
+            self.request_close(id);
+        }
     }
 
     fn update_window_title(&mut self, ctx: &egui::Context) {
-        let title = match &self.tab {
-            Some(tab) => format!("{} — rooste-ssh", tab.title),
+        let title = match self
+            .active_tab_id()
+            .and_then(|id| self.tree.tiles.get_pane(&id))
+        {
+            Some(tab) => format!(
+                "{} — rooste-ssh",
+                tab.remote_title.clone().unwrap_or_else(|| tab.name.clone())
+            ),
             None => "rooste-ssh".into(),
         };
         if title != self.window_title {
@@ -254,153 +820,11 @@ impl RoosteApp {
             self.window_title = title;
         }
     }
+}
 
-    fn form_ui(&mut self, ui: &mut Ui) {
-        let ctx = ui.ctx().clone();
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(24.0);
-                ui.heading("New connection");
-                ui.add_space(12.0);
-            });
-            let mut submit = false;
-            egui::Grid::new("connect-form")
-                .num_columns(2)
-                .spacing([12.0, 8.0])
-                .show(ui, |ui| {
-                    let mut field =
-                        |ui: &mut Ui, label: &str, value: &mut String, password: bool| {
-                            let label = ui.label(label);
-                            let edit = egui::TextEdit::singleline(value)
-                                .password(password)
-                                .desired_width(280.0);
-                            let response = ui.add(edit).labelled_by(label.id);
-                            submit |= response.lost_focus()
-                                && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            ui.end_row();
-                        };
-                    field(ui, "Host", &mut self.form.host, false);
-                    field(ui, "Port", &mut self.form.port, false);
-                    field(ui, "User", &mut self.form.user, false);
-                    field(ui, "Password", &mut self.form.password, true);
-                    field(ui, "Key file", &mut self.form.key_file, false);
-                    field(ui, "Key passphrase", &mut self.form.key_passphrase, true);
-                    ui.label("");
-                    ui.checkbox(&mut self.form.use_agent, "Use SSH agent");
-                    ui.end_row();
-                    ui.label("");
-                    ui.checkbox(&mut self.form.allow_legacy, "Allow legacy algorithms")
-                        .on_hover_text("Offer outdated SHA-1 and CBC algorithms for old devices");
-                    ui.end_row();
-                });
-            ui.add_space(8.0);
-            if let Some(error) = &self.form_error {
-                ui.colored_label(ui.visuals().error_fg_color, error);
-            }
-            if ui.button("Connect").clicked() || submit {
-                self.connect(&ctx);
-            }
-        });
-    }
-
-    fn session_ui(&mut self, ui: &mut Ui) {
-        let mut back_to_form = false;
-        let mut reconnect = false;
-        let ctx = ui.ctx().clone();
-        let Some(tab) = self.tab.as_mut() else {
-            return;
-        };
-
-        egui::Panel::top("status").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(&tab.title).strong());
-                ui.separator();
-                let status = tab.status_text();
-                match tab.state {
-                    TabState::Failed(_) => ui.colored_label(ui.visuals().error_fg_color, status),
-                    _ => ui.label(status),
-                };
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| match tab.state {
-                    TabState::Connecting(_) | TabState::Connected => {
-                        if ui.button("Disconnect").clicked() {
-                            tab.close();
-                        }
-                    }
-                    TabState::Closed(_) | TabState::Failed(_) => {
-                        if ui.button("New connection").clicked() {
-                            back_to_form = true;
-                        }
-                        if ui.button("Reconnect").clicked() {
-                            reconnect = true;
-                        }
-                    }
-                });
-            });
-        });
-
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ui, |ui| {
-                let out = tab.view.show(ui, &mut tab.terminal);
-                if tab.state == TabState::Connected {
-                    // Also catches resizes that happened while connecting.
-                    let size = tab.terminal.size();
-                    if size != tab.remote_size {
-                        tab.session.send(SessionCommand::Resize(size.0, size.1));
-                        tab.remote_size = size;
-                    }
-                    if !out.send.is_empty() {
-                        tab.session.send(SessionCommand::Input(out.send));
-                    }
-                }
-            });
-
-        if reconnect {
-            let mut request = tab.request.clone();
-            let (cols, rows) = tab.terminal.size();
-            (request.cols, request.rows) = (cols, rows);
-            self.tab = Some(SessionTab::open(self.runtime.handle(), &ctx, request));
-        } else if back_to_form {
-            self.tab = None;
-        }
-    }
-
-    fn host_key_dialog(&mut self, ctx: &egui::Context) {
-        let Some(tab) = self.tab.as_mut() else {
-            return;
-        };
-        let Some(key) = tab.pending_host_key().cloned() else {
-            return;
-        };
-        let mut answer = None;
-        egui::Modal::new(egui::Id::new("host-key")).show(ctx, |ui| {
-            ui.set_max_width(460.0);
-            ui.heading("Unknown host");
-            let host = if key.port == 22 {
-                key.host.clone()
-            } else {
-                format!("{}:{}", key.host, key.port)
-            };
-            ui.label(format!(
-                "The authenticity of host {host} can't be established. Check that this \
-                 fingerprint matches the server before trusting it."
-            ));
-            ui.add_space(6.0);
-            ui.label(format!("{} key fingerprint:", key.algorithm));
-            ui.monospace(&key.fingerprint);
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                if ui.button("Trust and connect").clicked() {
-                    answer = Some(true);
-                }
-                if ui.button("Cancel").clicked() {
-                    answer = Some(false);
-                }
-            });
-        });
-        if let Some(trust) = answer {
-            tab.answer_host_key(trust);
-        }
+impl Default for RoosteApp {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -415,7 +839,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn form_validation() {
+    fn quick_form_validation() {
         let mut form = ConnectForm {
             user: "me".into(),
             ..ConnectForm::default()
@@ -430,6 +854,6 @@ mod tests {
         assert_eq!(request.host, "example.com");
         assert_eq!(request.port, 2222);
         assert_eq!(request.password.as_deref(), Some("pw"));
-        assert_eq!(request.key_file, None);
+        assert!(request.prompt_for_password);
     }
 }

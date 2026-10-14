@@ -2,9 +2,14 @@
 
 pub mod app;
 pub mod boxdraw;
+pub mod dialogs;
 pub mod fonts;
 pub mod keys;
+pub mod manager;
+pub mod secrets;
 pub mod session;
+pub mod tab;
 pub mod terminal_view;
+pub mod theme;
 
 pub use app::RoosteApp;

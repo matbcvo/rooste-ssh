@@ -26,6 +26,13 @@ eframe = "0.36.2"
 egui = "0.36.2"
 egui_kittest = { version = "0.36.2", features = ["wgpu", "snapshot"] }
 insta = "1.49.0"
+egui_tiles = "0.17.1"
+keyring = "4.2.0"
+proptest = "1.12.0"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"
+uuid = { version = "1.28.0", features = ["v4"] }
+winreg = "0.56.0"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures = "0.3.34"
 rpassword = "7.5.4"

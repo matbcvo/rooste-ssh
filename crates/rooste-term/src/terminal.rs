@@ -105,7 +105,7 @@ impl Screen {
 #[derive(Clone)]
 struct Listener {
     events: Arc<Mutex<Vec<TermEvent>>>,
-    palette: Arc<Palette>,
+    palette: Arc<Mutex<Palette>>,
     window: Arc<Mutex<WindowSize>>,
 }
 
@@ -127,12 +127,14 @@ impl EventListener for Listener {
             Event::Bell => self.push(TermEvent::Bell),
             Event::ClipboardStore(_, text) => self.push(TermEvent::Clipboard(text)),
             Event::ColorRequest(index, format) => {
+                let palette = self.palette.lock().unwrap_or_else(|e| e.into_inner());
                 let rgb = match index {
-                    0..=255 => self.palette.indexed(index as u8),
-                    257 => self.palette.background,
-                    258 => self.palette.cursor,
-                    _ => self.palette.foreground,
+                    0..=255 => palette.indexed(index as u8),
+                    257 => palette.background,
+                    258 => palette.cursor,
+                    _ => palette.foreground,
                 };
+                drop(palette);
                 let reply = format(ansi::Rgb {
                     r: rgb.r,
                     g: rgb.g,
@@ -192,14 +194,19 @@ impl Terminal {
     }
 
     pub fn with_palette(cols: u16, rows: u16, palette: Palette) -> Self {
+        Self::with_options(cols, rows, palette, DEFAULT_SCROLLBACK)
+    }
+
+    /// A terminal with a palette and `scrollback` lines of history.
+    pub fn with_options(cols: u16, rows: u16, palette: Palette, scrollback: usize) -> Self {
         let (cols, rows) = (usize::from(cols.max(1)), usize::from(rows.max(1)));
         let listener = Listener {
             events: Arc::default(),
-            palette: Arc::new(palette),
+            palette: Arc::new(Mutex::new(palette)),
             window: Arc::new(Mutex::new(window_size(cols, rows, 0, 0))),
         };
         let config = Config {
-            scrolling_history: DEFAULT_SCROLLBACK,
+            scrolling_history: scrollback,
             ..Config::default()
         };
         Self {
@@ -244,8 +251,30 @@ impl Terminal {
         }
     }
 
-    pub fn palette(&self) -> &Palette {
-        &self.listener.palette
+    pub fn palette(&self) -> Palette {
+        self.listener
+            .palette
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Switch colors, e.g. when the theme changes.
+    pub fn set_palette(&mut self, palette: Palette) {
+        *self
+            .listener
+            .palette
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = palette;
+    }
+
+    /// Change how many lines of history are kept.
+    pub fn set_scrollback(&mut self, lines: usize) {
+        let config = Config {
+            scrolling_history: lines,
+            ..Config::default()
+        };
+        self.term.set_options(config);
     }
 
     /// Key encoding modes set by the remote application.
@@ -349,7 +378,7 @@ impl Terminal {
 
     /// The visible screen with colors resolved against the palette.
     pub fn screen(&self) -> Screen {
-        let palette = &*self.listener.palette;
+        let palette = &self.palette();
         let content = self.term.renderable_content();
         let overrides = content.colors;
         let resolve = |color: Color, bold: bool| -> Rgb {

@@ -28,7 +28,18 @@ pub struct ConnectRequest {
     pub known_hosts: Option<PathBuf>,
     pub cols: u16,
     pub rows: u16,
+    /// Ask for a password when no other method works (as `ssh` does).
+    pub prompt_for_password: bool,
 }
+
+/// What a prompt asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PromptKind {
+    Password { user: String, host: String },
+    Passphrase { key_file: PathBuf },
+}
+
+const PROMPT_ATTEMPTS: usize = 3;
 
 /// From the session to the UI.
 #[derive(Debug)]
@@ -39,6 +50,15 @@ pub enum SessionEvent {
         key: UnknownHostKey,
         reply: oneshot::Sender<bool>,
     },
+    /// A secret is needed; answer `None` to cancel.
+    Prompt {
+        kind: PromptKind,
+        /// The previous attempt was rejected.
+        retry: bool,
+        reply: oneshot::Sender<Option<String>>,
+    },
+    /// Login succeeded with this password (so the UI may save it).
+    PasswordAccepted(String),
     Connected,
     Output(Vec<u8>),
     Closed {
@@ -138,7 +158,7 @@ async fn run(
 
     let mut client = connect(&config).await.map_err(describe)?;
     sink.send(SessionEvent::Status("Authenticating…".into()));
-    if !authenticate(&mut client, &request).await? {
+    if !authenticate(&mut client, &request, sink).await? {
         return Err(format!(
             "Authentication failed for {}@{}",
             request.user, request.host
@@ -183,6 +203,7 @@ async fn run(
 async fn authenticate(
     client: &mut rooste_proto::ssh::SshClient,
     request: &ConnectRequest,
+    sink: &EventSink,
 ) -> Result<bool, String> {
     let user = request.user.as_str();
     if request.use_agent {
@@ -195,23 +216,87 @@ async fn authenticate(
             Err(e) => return Err(describe(e)),
         }
     }
-    if let Some(path) = &request.key_file {
-        let key = load_private_key(path, request.key_passphrase.as_deref()).map_err(describe)?;
-        if client
+    if let Some(path) = &request.key_file
+        && let Some(key) = load_key(path, request.key_passphrase.as_deref(), sink).await?
+        && client
             .authenticate(user, &Auth::PublicKey(Arc::new(key)))
             .await
             .map_err(describe)?
-        {
+    {
+        return Ok(true);
+    }
+
+    let mut retry = false;
+    if let Some(password) = &request.password {
+        if try_password(client, user, password).await? {
             return Ok(true);
         }
+        retry = true;
     }
-    if let Some(password) = &request.password {
-        return client
-            .authenticate(user, &Auth::password(password.clone()))
-            .await
-            .map_err(describe);
+    if !request.prompt_for_password {
+        return Ok(false);
+    }
+    for _ in 0..PROMPT_ATTEMPTS {
+        let kind = PromptKind::Password {
+            user: request.user.clone(),
+            host: request.host.clone(),
+        };
+        let Some(password) = prompt(sink, kind, retry).await else {
+            return Err("Login cancelled".into());
+        };
+        if try_password(client, user, &password).await? {
+            sink.send(SessionEvent::PasswordAccepted(password));
+            return Ok(true);
+        }
+        retry = true;
     }
     Ok(false)
+}
+
+async fn try_password(
+    client: &mut rooste_proto::ssh::SshClient,
+    user: &str,
+    password: &str,
+) -> Result<bool, String> {
+    client
+        .authenticate(user, &Auth::password(password))
+        .await
+        .map_err(describe)
+}
+
+/// Load a key, asking for its passphrase if it is encrypted and none was
+/// given. `None` if the user cancels.
+async fn load_key(
+    path: &std::path::Path,
+    passphrase: Option<&str>,
+    sink: &EventSink,
+) -> Result<Option<rooste_proto::ssh::PrivateKey>, String> {
+    match load_private_key(path, passphrase) {
+        Ok(key) => return Ok(Some(key)),
+        Err(SshError::KeyEncrypted(_)) => {}
+        Err(e) if passphrase.is_none() => return Err(describe(e)),
+        Err(_) => {}
+    }
+    let mut retry = passphrase.is_some();
+    for _ in 0..PROMPT_ATTEMPTS {
+        let kind = PromptKind::Passphrase {
+            key_file: path.to_owned(),
+        };
+        let Some(passphrase) = prompt(sink, kind, retry).await else {
+            return Ok(None);
+        };
+        if let Ok(key) = load_private_key(path, Some(&passphrase)) {
+            return Ok(Some(key));
+        }
+        retry = true;
+    }
+    Ok(None)
+}
+
+async fn prompt(sink: &EventSink, kind: PromptKind, retry: bool) -> Option<String> {
+    let (reply, answer) = oneshot::channel();
+    sink.send(SessionEvent::Prompt { kind, retry, reply });
+    answer.await.ok().flatten()
 }
 
 /// A user-facing message for an error, including its causes.
