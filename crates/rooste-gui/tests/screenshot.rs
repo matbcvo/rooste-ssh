@@ -215,3 +215,75 @@ fn render_dialogs() {
         image.save(out.join(format!("{name}.png"))).unwrap();
     }
 }
+
+/// A tab whose login failed with a long error message.
+#[test]
+#[ignore = "renders with wgpu; run manually to inspect the output"]
+fn render_failed_tab() {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use egui_kittest::kittest::Queryable;
+    use rooste_core::{Config, MemoryStore};
+    use rooste_gui::RoosteApp;
+    use rooste_testkit::{TEST_USER, TestServer};
+
+    let net = tokio::runtime::Runtime::new().unwrap();
+    let server = net.block_on(TestServer::start());
+    let dir = tempfile::tempdir().unwrap();
+    let known_hosts = dir.path().join("known_hosts");
+    rooste_proto::ssh::known_hosts::learn(
+        &known_hosts,
+        "127.0.0.1",
+        server.addr.port(),
+        &server.host_key,
+    )
+    .unwrap();
+    let not_a_key = dir
+        .path()
+        .join("a-folder-with-a-rather-long-name")
+        .join("another-long-folder-name-to-make-this-wrap")
+        .join("private_key3.openssh");
+    std::fs::create_dir_all(not_a_key.parent().unwrap()).unwrap();
+    std::fs::write(&not_a_key, "not a key\n").unwrap();
+
+    let mut app = RoosteApp::with_config(Config::default(), None, Arc::new(MemoryStore::default()))
+        .with_known_hosts(known_hosts);
+    app.quick.host = "127.0.0.1".into();
+    app.quick.port = server.addr.port().to_string();
+    app.quick.user = TEST_USER.into();
+    app.quick.use_agent = false;
+    app.quick.key_file = not_a_key.display().to_string();
+    let mut harness = Harness::builder()
+        .with_size([1000.0, 640.0])
+        .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
+    rooste_gui::fonts::install(&harness.ctx);
+    harness.run();
+    harness.get_by_label("Connect").hover();
+    harness.run();
+    harness.get_by_label("Connect").click();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !harness.state().tabs().any(|t| t.has_ended()) {
+        assert!(
+            Instant::now() < deadline,
+            "the login should fail: {:?}",
+            (
+                harness
+                    .state()
+                    .tabs()
+                    .map(|t| t.status_text())
+                    .collect::<Vec<_>>(),
+                &harness.state().quick_error
+            )
+        );
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    for _ in 0..5 {
+        harness.step();
+    }
+    let image = harness.render().expect("render with wgpu");
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
+    std::fs::create_dir_all(&out).unwrap();
+    image.save(out.join("failed-tab.png")).unwrap();
+}

@@ -882,13 +882,10 @@ fn file_panel_browse_transfer_and_manage() {
     // Select a file and download it with the toolbar button.
     click(&mut harness, "📄 notes.txt  (12 B)");
     click(&mut harness, "Download");
+    // The file appears before its contents are written; wait for all of it.
     wait_for(&mut harness, "download", |_| {
-        downloads.join("notes.txt").exists()
+        std::fs::read_to_string(downloads.join("notes.txt")).is_ok_and(|t| t == "remote notes")
     });
-    assert_eq!(
-        std::fs::read_to_string(downloads.join("notes.txt")).unwrap(),
-        "remote notes"
-    );
 
     // Open a folder.
     click(&mut harness, "📁 logs");
@@ -1025,7 +1022,7 @@ fn builtin_agent_logs_into_sessions() {
     harness.get_by_label("Load key").click();
     settle(&mut harness);
     harness
-        .get_by_label("Use this agent for rooste-ssh sessions")
+        .get_by_label("Use this agent for Rooste SSH sessions")
         .click();
     settle(&mut harness);
     let Some(Dialog::Agent(window)) = &harness.state().dialog else {

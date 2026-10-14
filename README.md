@@ -1,4 +1,4 @@
-# rooste-ssh
+# Rooste SSH
 
 A modern, memory-safe SSH client for Linux and Windows, written in Rust — with tabs, split panes,
 a session manager, built-in SFTP, key generator and agent.

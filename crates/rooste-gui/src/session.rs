@@ -613,8 +613,12 @@ pub fn describe(error: SshError) -> String {
     let mut message = error.to_string();
     let mut source = error.source();
     while let Some(cause) = source {
-        message.push_str(": ");
-        message.push_str(&cause.to_string());
+        // Some errors already include their cause's text.
+        let text = cause.to_string();
+        if !message.contains(&text) {
+            message.push_str(": ");
+            message.push_str(&text);
+        }
         source = cause.source();
     }
     if let SshError::NoCommonAlgorithm {

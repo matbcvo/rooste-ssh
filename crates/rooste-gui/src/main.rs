@@ -14,7 +14,7 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("rooste-ssh")
+            .with_title("Rooste SSH")
             .with_app_id("io.github.matbcvo.rooste-ssh")
             .with_icon(egui::IconData {
                 rgba: ICON.to_vec(),

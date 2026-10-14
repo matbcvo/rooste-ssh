@@ -1,6 +1,6 @@
 [package]
 name = "rooste-gui"
-description = "rooste-ssh desktop application"
+description = "Rooste SSH desktop application"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -42,7 +42,7 @@ workspace = true
 
 # Installers and Linux packages (cargo packager, see release.yml).
 [package.metadata.packager]
-product-name = "rooste-ssh"
+product-name = "Rooste SSH"
 identifier = "io.github.matbcvo.rooste-ssh"
 publisher = "Martin Vooremäe"
 description = "SSH, telnet and serial terminal with tabs, SFTP and port forwarding"

@@ -47,6 +47,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # The cache can restore output from an earlier run; start clean.
+      - name: Remove old packages
+        run: rm -rf target/packages target/rooste-ssh-*
       - uses: actions/download-artifact@v8
         with:
           name: notices
@@ -122,6 +125,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # The cache can restore output from an earlier run; start clean.
+      - name: Remove old packages
+        shell: bash
+        run: rm -rf target/packages target/winget target/rooste-ssh-*
       - uses: actions/download-artifact@v8
         with:
           name: notices
@@ -175,7 +182,7 @@ jobs:
           $msi = (Get-ChildItem target\packages\*.msi).FullName
           $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$env:RUNNER_TEMP\msi.log`"" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\msi.log" -Tail 50; exit $p.ExitCode }
-          $cli = Get-ChildItem "$env:ProgramFiles\rooste-ssh" -Recurse -Filter rooste-cli.exe | Select-Object -First 1
+          $cli = Get-ChildItem "$env:ProgramFiles\Rooste SSH" -Recurse -Filter rooste-cli.exe | Select-Object -First 1
           if (-not $cli) { Get-ChildItem "$env:ProgramFiles" -Recurse -Filter rooste*.exe -ErrorAction SilentlyContinue; exit 1 }
           & $cli.FullName --version
           # Log in to the Windows OpenSSH Server with the installed client.

@@ -1,4 +1,4 @@
-# rooste-ssh roadmap
+# Rooste SSH roadmap
 
 ## Goal
 

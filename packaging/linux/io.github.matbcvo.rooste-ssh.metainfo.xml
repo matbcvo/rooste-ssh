@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>io.github.matbcvo.rooste-ssh</id>
-  <name>rooste-ssh</name>
+  <name>Rooste SSH</name>
   <summary>SSH, telnet and serial terminal with tabs, SFTP and port forwarding</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
@@ -10,7 +10,7 @@
   </developer>
   <description>
     <p>
-      rooste-ssh is a memory-safe SSH client written in Rust. It keeps saved sessions in a
+      Rooste SSH is a memory-safe SSH client written in Rust. It keeps saved sessions in a
       searchable manager, opens them in tabs and split panes, and includes an SFTP file panel,
       port forwarding, jump hosts, a key generator and a built-in SSH agent. Telnet, raw TCP
       and serial connections are supported too.
