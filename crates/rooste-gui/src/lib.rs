@@ -8,6 +8,7 @@ pub mod fonts;
 pub mod keys;
 pub mod manager;
 pub mod palette;
+pub mod picker;
 pub mod secrets;
 pub mod session;
 pub mod tab;

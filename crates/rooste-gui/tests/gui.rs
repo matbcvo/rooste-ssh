@@ -295,6 +295,27 @@ fn create_a_profile_in_the_editor() {
 }
 
 #[test]
+fn browse_buttons_fill_key_file_fields() {
+    let f = Fixture::new();
+    let key = f.dir.path().join("id_browse");
+    let mut harness = harness(f.app(Config::default()));
+    harness.state_mut().picker.fake_answer = Some(key.clone());
+
+    click(&mut harness, "Browse…");
+    assert_eq!(harness.state().quick.key_file, key.display().to_string());
+
+    harness.get_by_label("➕").click();
+    settle(&mut harness);
+    type_into(&mut harness, "Name", "Browsed");
+    type_into(&mut harness, "Host", "server.example.com");
+    click(&mut harness, "Browse…");
+    harness.get_by_label("Save").click();
+    settle(&mut harness);
+    assert!(harness.state().dialog.is_none());
+    assert_eq!(f.saved_config().profiles[0].key_file, Some(key));
+}
+
+#[test]
 fn search_filters_the_list() {
     let f = Fixture::new();
     let config = Config {

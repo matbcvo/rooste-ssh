@@ -8,6 +8,7 @@ use rooste_core::{
 };
 use rooste_proto::ssh::UnknownHostKey;
 
+use crate::picker::{PickId, PickKind, Picker, path_row};
 use crate::session::PromptKind;
 
 /// Outcome of a dialog for one frame.
@@ -128,6 +129,7 @@ impl ProfileEditor {
         ctx: &egui::Context,
         folders: &[String],
         ports: &[String],
+        picker: &mut Picker,
     ) -> Decision<(Profile, String)> {
         let mut decision = Decision::Pending;
         let title = if self.is_new {
@@ -198,7 +200,14 @@ impl ProfileEditor {
                     }
                     if p.protocol == Protocol::Ssh {
                         text(ui, "User", &mut p.user);
-                        text(ui, "Key file", &mut self.key_file);
+                        path_row(
+                            ui,
+                            "Key file",
+                            &mut self.key_file,
+                            picker,
+                            PickId::ProfileKeyFile,
+                            PickKind::OpenFile,
+                        );
                         labeled(ui, "", |ui| ui.checkbox(&mut p.use_agent, "Use SSH agent"));
                         labeled(ui, "", |ui| {
                             ui.checkbox(&mut p.save_password, "Save password in the system keyring")
@@ -392,7 +401,7 @@ pub struct SettingsEditor {
 }
 
 impl SettingsEditor {
-    pub fn show(&mut self, ctx: &egui::Context) -> Decision<Settings> {
+    pub fn show(&mut self, ctx: &egui::Context, picker: &mut Picker) -> Decision<Settings> {
         let mut decision = Decision::Pending;
         Modal::new(Id::new("settings")).show(ctx, |ui| {
             ui.heading("Settings");
@@ -420,13 +429,14 @@ impl SettingsEditor {
                         .response
                     });
                     text(ui, "Default user", &mut s.default_user);
-                    labeled(ui, "Download folder", |ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut s.download_dir)
-                                .hint_text("~/Downloads")
-                                .desired_width(300.0),
-                        )
-                    });
+                    path_row(
+                        ui,
+                        "Download folder",
+                        &mut s.download_dir,
+                        picker,
+                        PickId::DownloadDir,
+                        PickKind::Folder,
+                    );
                     labeled(ui, "", |ui| {
                         ui.checkbox(&mut s.copy_on_select, "Copy text when selected")
                     });

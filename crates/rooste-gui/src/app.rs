@@ -12,6 +12,7 @@ use rooste_proto::ssh::AgentSource;
 use crate::dialogs::{self, Decision, ProfileEditor, SettingsEditor};
 use crate::manager::{self, ManagerAction, ManagerState};
 use crate::palette::{self as command_palette, Command};
+use crate::picker::{PickId, PickKind, Picker, path_row};
 use crate::session::ConnectRequest;
 use crate::tab::{SessionTab, TabAction};
 use crate::theme;
@@ -177,6 +178,8 @@ pub struct RoosteApp {
     update_check: Option<std::sync::mpsc::Receiver<Option<crate::update::Release>>>,
     /// Serial ports found when the profile editor opened.
     serial_ports: Vec<String>,
+    /// Native file dialogs for the "Browse…" buttons.
+    pub picker: Picker,
     known_hosts: Option<PathBuf>,
     imports: ImportSources,
     window_title: String,
@@ -231,6 +234,7 @@ impl RoosteApp {
             .enable_all()
             .build()
             .expect("start tokio runtime");
+        let picker = Picker::new(runtime.handle().clone());
         Self {
             runtime,
             config,
@@ -248,6 +252,7 @@ impl RoosteApp {
             builtin_agent: None,
             update_check: None,
             serial_ports: Vec::new(),
+            picker,
             known_hosts: None,
             imports: ImportSources::default(),
             window_title: String::new(),
@@ -703,6 +708,7 @@ impl RoosteApp {
     /// Draw one frame.
     pub fn show(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        self.picker.poll();
         if self.applied_theme != Some(self.config.settings.theme) {
             ctx.set_visuals(theme::visuals(self.config.settings.theme));
             self.applied_theme = Some(self.config.settings.theme);
@@ -968,7 +974,15 @@ impl RoosteApp {
                 field(ui, "Port", &mut self.quick.port, false);
                 field(ui, "User", &mut self.quick.user, false);
                 field(ui, "Password", &mut self.quick.password, true);
-                field(ui, "Key file", &mut self.quick.key_file, false);
+                let key_file = path_row(
+                    ui,
+                    "Key file",
+                    &mut self.quick.key_file,
+                    &mut self.picker,
+                    PickId::QuickKeyFile,
+                    PickKind::OpenFile,
+                );
+                submit |= key_file.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.label("");
                 ui.checkbox(&mut self.quick.use_agent, "Use SSH agent");
                 ui.end_row();
@@ -1013,7 +1027,12 @@ impl RoosteApp {
         };
         let keep = match &mut dialog {
             Dialog::EditProfile(editor) => {
-                match editor.show(ctx, &self.config.folders(), &self.serial_ports) {
+                match editor.show(
+                    ctx,
+                    &self.config.folders(),
+                    &self.serial_ports,
+                    &mut self.picker,
+                ) {
                     Decision::Pending => true,
                     Decision::Cancel => false,
                     Decision::Accept((profile, password)) => {
@@ -1031,7 +1050,7 @@ impl RoosteApp {
                     }
                 }
             }
-            Dialog::Settings(editor) => match editor.show(ctx) {
+            Dialog::Settings(editor) => match editor.show(ctx, &mut self.picker) {
                 Decision::Pending => true,
                 Decision::Cancel => false,
                 Decision::Accept(settings) => {
@@ -1093,12 +1112,20 @@ impl RoosteApp {
                     }
                 }
             }
-            Dialog::KeyGenerator(generator) => generator.show(ctx) == Decision::Pending,
-            Dialog::KeyConverter(converter) => converter.show(ctx) == Decision::Pending,
+            Dialog::KeyGenerator(generator) => {
+                generator.show(ctx, &mut self.picker) == Decision::Pending
+            }
+            Dialog::KeyConverter(converter) => {
+                converter.show(ctx, &mut self.picker) == Decision::Pending
+            }
             Dialog::Agent(window) => {
                 let mut use_agent = self.config.settings.use_builtin_agent;
-                let (decision, action) =
-                    window.show(ctx, self.builtin_agent.as_ref(), &mut use_agent);
+                let (decision, action) = window.show(
+                    ctx,
+                    self.builtin_agent.as_ref(),
+                    &mut use_agent,
+                    &mut self.picker,
+                );
                 if use_agent != self.config.settings.use_builtin_agent {
                     self.config.settings.use_builtin_agent = use_agent;
                     self.save_config();

@@ -7,6 +7,7 @@ use egui::{Id, Modal, RichText, Ui};
 use rooste_keys::{Agent, KeyType, PublicKey, keygen, ppk};
 
 use crate::dialogs::Decision;
+use crate::picker::{PickId, PickKind, Picker, path_row};
 
 fn field(ui: &mut Ui, label: &str, value: &mut String, password: bool) -> egui::Response {
     let label = ui.label(label);
@@ -80,7 +81,7 @@ impl KeyGenerator {
         }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context) -> Decision<()> {
+    pub fn show(&mut self, ctx: &egui::Context, picker: &mut Picker) -> Decision<()> {
         let mut decision = Decision::Pending;
         Modal::new(Id::new("key-generator")).show(ctx, |ui| {
             ui.heading("Key generator");
@@ -123,7 +124,14 @@ impl KeyGenerator {
                     field(ui, "Comment", &mut self.comment, false);
                     field(ui, "Passphrase", &mut self.passphrase, true);
                     field(ui, "Repeat passphrase", &mut self.confirm, true);
-                    field(ui, "Save as", &mut self.path, false);
+                    path_row(
+                        ui,
+                        "Save as",
+                        &mut self.path,
+                        picker,
+                        PickId::KeyGenSave,
+                        PickKind::SaveFile,
+                    );
                 });
             if self.passphrase.is_empty() {
                 ui.weak("Without a passphrase, anyone who gets the file can use the key.");
@@ -190,7 +198,7 @@ impl KeyConverter {
         }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context) -> Decision<()> {
+    pub fn show(&mut self, ctx: &egui::Context, picker: &mut Picker) -> Decision<()> {
         let mut decision = Decision::Pending;
         Modal::new(Id::new("key-converter")).show(ctx, |ui| {
             ui.heading("Convert key");
@@ -199,12 +207,26 @@ impl KeyConverter {
                 .num_columns(2)
                 .spacing([12.0, 6.0])
                 .show(ui, |ui| {
-                    let input = field(ui, "Key file", &mut self.input, false);
+                    let input = path_row(
+                        ui,
+                        "Key file",
+                        &mut self.input,
+                        picker,
+                        PickId::ConvertInput,
+                        PickKind::OpenFile,
+                    );
                     if input.changed() && self.output.is_empty() {
                         // Suggest an output name next to the input.
                     }
                     field(ui, "Passphrase", &mut self.passphrase, true);
-                    field(ui, "Save as", &mut self.output, false);
+                    path_row(
+                        ui,
+                        "Save as",
+                        &mut self.output,
+                        picker,
+                        PickId::ConvertOutput,
+                        PickKind::SaveFile,
+                    );
                     field(ui, "New passphrase", &mut self.new_passphrase, true);
                 });
             if self.output.trim().is_empty() && !self.input.trim().is_empty() {
@@ -258,6 +280,7 @@ impl AgentWindow {
         ctx: &egui::Context,
         agent: Option<&Agent>,
         use_for_sessions: &mut bool,
+        picker: &mut Picker,
     ) -> (Decision<()>, Option<AgentAction>) {
         let mut decision = Decision::Pending;
         let mut action = None;
@@ -294,7 +317,7 @@ impl AgentWindow {
                     }
                     ui.separator();
                     egui::Grid::new("agent-load").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                        field(ui, "Key file", &mut self.key_file, false);
+                        path_row(ui, "Key file", &mut self.key_file, picker, PickId::AgentKeyFile, PickKind::OpenFile);
                         field(ui, "Passphrase", &mut self.passphrase, true);
                     });
                     ui.horizontal(|ui| {
