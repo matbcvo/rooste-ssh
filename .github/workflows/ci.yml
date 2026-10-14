@@ -66,13 +66,18 @@ jobs:
         run: |
           docker build -t rooste-openssh -f crates/rooste-testkit/docker/openssh/Dockerfile crates/rooste-testkit/docker
           docker run -d --rm -p 2222:22 --name rooste-openssh rooste-openssh
-          for i in $(seq 1 30); do
-            nc -z 127.0.0.1 2222 && break
-            sleep 1
+          docker build -t rooste-telnet crates/rooste-testkit/docker/telnet
+          docker run -d --rm -p 2323:23 --name rooste-telnet rooste-telnet
+          for port in 2222 2323; do
+            for i in $(seq 1 30); do
+              nc -z 127.0.0.1 $port && break
+              sleep 1
+            done
           done
       - run: cargo nextest run --workspace --profile ci --run-ignored only -E 'not binary(screenshot) and not binary(interop)'
         env:
           ROOSTE_TEST_SSH_ADDR: 127.0.0.1:2222
+          ROOSTE_TEST_TELNET_ADDR: 127.0.0.1:2323
       - name: OpenSSH logs
         if: failure()
         run: docker logs rooste-openssh
@@ -108,7 +113,7 @@ jobs:
           Copy-Item crates/rooste-testkit/docker/authorized_keys $keys
           icacls $keys /inheritance:r /grant "*S-1-5-32-544:F" /grant "SYSTEM:F"
           Restart-Service sshd
-      - run: cargo nextest run --workspace --profile ci --run-ignored only -E 'not binary(screenshot) and not binary(interop)'
+      - run: cargo nextest run --workspace --profile ci --run-ignored only -E 'not binary(screenshot) and not binary(interop) and not test(busybox_telnetd)'
       - name: OpenSSH logs
         if: failure()
         shell: pwsh

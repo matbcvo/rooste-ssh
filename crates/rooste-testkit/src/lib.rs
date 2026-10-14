@@ -15,6 +15,7 @@ mod agent;
 mod echo;
 mod server;
 mod sftp;
+mod telnet;
 
 use std::io::{self, BufRead, BufReader};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -26,6 +27,7 @@ use russh::keys::{PrivateKey, PublicKey};
 pub use agent::TestAgent;
 pub use echo::EchoServer;
 pub use server::TestServer;
+pub use telnet::TelnetServer;
 
 /// Credentials accepted by [`TestServer`] and the Docker fixture. Test-only.
 pub const TEST_USER: &str = "rooste";

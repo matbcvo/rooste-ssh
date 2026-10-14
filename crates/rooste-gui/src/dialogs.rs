@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 
 use egui::{Id, Modal, Ui};
-use rooste_core::{Profile, Protocol, Settings, Theme, Tunnel, TunnelKind};
+use rooste_core::{
+    FlowControl, Parity, Profile, Protocol, SerialSettings, Settings, Theme, Tunnel, TunnelKind,
+};
 use rooste_proto::ssh::UnknownHostKey;
 
 use crate::session::PromptKind;
@@ -88,7 +90,11 @@ impl ProfileEditor {
             .collect::<Vec<_>>()
             .join("/");
         if profile.host.is_empty() {
-            return Err("Enter a host name.".into());
+            return Err(if profile.protocol == Protocol::Serial {
+                "Enter a serial port, such as COM3 or /dev/ttyUSB0.".into()
+            } else {
+                "Enter a host name.".into()
+            });
         }
         profile.port = match self.port.trim() {
             "" => None,
@@ -117,7 +123,12 @@ impl ProfileEditor {
         Ok(profile)
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, folders: &[String]) -> Decision<(Profile, String)> {
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        folders: &[String],
+        ports: &[String],
+    ) -> Decision<(Profile, String)> {
         let mut decision = Decision::Pending;
         let title = if self.is_new {
             "New session"
@@ -168,34 +179,51 @@ impl ProfileEditor {
                             })
                             .response
                     });
-                    text(ui, "Host", &mut p.host);
-                    text(ui, "Port", &mut self.port);
-                    text(ui, "User", &mut p.user);
-                    text(ui, "Key file", &mut self.key_file);
-                    labeled(ui, "", |ui| ui.checkbox(&mut p.use_agent, "Use SSH agent"));
-                    labeled(ui, "", |ui| {
-                        ui.checkbox(&mut p.save_password, "Save password in the system keyring")
-                    });
-                    if p.save_password {
-                        labeled(ui, "Password", |ui| {
+                    if p.protocol == Protocol::Serial {
+                        serial_fields(ui, &mut p.host, &mut p.serial, ports);
+                    } else {
+                        text(ui, "Host", &mut p.host);
+                        let default_port = p
+                            .protocol
+                            .default_port()
+                            .map(|d| d.to_string())
+                            .unwrap_or_default();
+                        labeled(ui, "Port", |ui| {
                             ui.add(
-                                egui::TextEdit::singleline(&mut self.password)
-                                    .password(true)
-                                    .hint_text("unchanged")
+                                egui::TextEdit::singleline(&mut self.port)
+                                    .hint_text(default_port)
                                     .desired_width(300.0),
                             )
                         });
                     }
-                    labeled(ui, "", |ui| {
-                        ui.checkbox(&mut p.allow_legacy, "Allow legacy algorithms")
-                            .on_hover_text(
-                                "Offer outdated SHA-1 and CBC algorithms for old devices",
-                            )
-                    });
-                    text(ui, "Jump host", &mut self.proxy_jump);
-                    labeled(ui, "", |ui| {
-                        ui.checkbox(&mut p.forward_agent, "Forward SSH agent")
-                    });
+                    if p.protocol == Protocol::Ssh {
+                        text(ui, "User", &mut p.user);
+                        text(ui, "Key file", &mut self.key_file);
+                        labeled(ui, "", |ui| ui.checkbox(&mut p.use_agent, "Use SSH agent"));
+                        labeled(ui, "", |ui| {
+                            ui.checkbox(&mut p.save_password, "Save password in the system keyring")
+                        });
+                        if p.save_password {
+                            labeled(ui, "Password", |ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.password)
+                                        .password(true)
+                                        .hint_text("unchanged")
+                                        .desired_width(300.0),
+                                )
+                            });
+                        }
+                        labeled(ui, "", |ui| {
+                            ui.checkbox(&mut p.allow_legacy, "Allow legacy algorithms")
+                                .on_hover_text(
+                                    "Offer outdated SHA-1 and CBC algorithms for old devices",
+                                )
+                        });
+                        text(ui, "Jump host", &mut self.proxy_jump);
+                        labeled(ui, "", |ui| {
+                            ui.checkbox(&mut p.forward_agent, "Forward SSH agent")
+                        });
+                    }
                     text(ui, "Tags", &mut self.tags);
                     labeled(ui, "Notes", |ui| {
                         ui.add(
@@ -205,7 +233,9 @@ impl ProfileEditor {
                         )
                     });
                 });
-            tunnels_ui(ui, &mut self.profile.tunnels);
+            if self.profile.protocol == Protocol::Ssh {
+                tunnels_ui(ui, &mut self.profile.tunnels);
+            }
             if let Some(error) = &self.error {
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
@@ -222,6 +252,76 @@ impl ProfileEditor {
         });
         decision
     }
+}
+
+fn serial_fields(ui: &mut Ui, port: &mut String, serial: &mut SerialSettings, ports: &[String]) {
+    labeled(ui, "Serial port", |ui| {
+        ui.horizontal(|ui| {
+            let response = ui.add(
+                egui::TextEdit::singleline(port)
+                    .hint_text(if cfg!(windows) {
+                        "COM3"
+                    } else {
+                        "/dev/ttyUSB0"
+                    })
+                    .desired_width(270.0),
+            );
+            ui.menu_button("▾", |ui| {
+                if ports.is_empty() {
+                    ui.weak("No serial ports found");
+                }
+                for name in ports {
+                    if ui.button(name).clicked() {
+                        *port = name.clone();
+                        ui.close();
+                    }
+                }
+            });
+            response
+        })
+        .inner
+    });
+    labeled(ui, "Speed (baud)", |ui| {
+        egui::ComboBox::from_id_salt("baud")
+            .selected_text(serial.baud.to_string())
+            .show_ui(ui, |ui| {
+                for rate in SerialSettings::BAUD_RATES {
+                    ui.selectable_value(&mut serial.baud, rate, rate.to_string());
+                }
+            })
+            .response
+    });
+    labeled(ui, "Data bits", |ui| {
+        ui.horizontal(|ui| {
+            for bits in 5..=8u8 {
+                ui.selectable_value(&mut serial.data_bits, bits, bits.to_string());
+            }
+        })
+        .response
+    });
+    labeled(ui, "Parity", |ui| {
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut serial.parity, Parity::None, "None");
+            ui.selectable_value(&mut serial.parity, Parity::Odd, "Odd");
+            ui.selectable_value(&mut serial.parity, Parity::Even, "Even");
+        })
+        .response
+    });
+    labeled(ui, "Stop bits", |ui| {
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut serial.stop_bits, 1, "1");
+            ui.selectable_value(&mut serial.stop_bits, 2, "2");
+        })
+        .response
+    });
+    labeled(ui, "Flow control", |ui| {
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut serial.flow_control, FlowControl::None, "None");
+            ui.selectable_value(&mut serial.flow_control, FlowControl::XonXoff, "XON/XOFF");
+            ui.selectable_value(&mut serial.flow_control, FlowControl::RtsCts, "RTS/CTS");
+        })
+        .response
+    });
 }
 
 fn tunnels_ui(ui: &mut Ui, tunnels: &mut Vec<Tunnel>) {

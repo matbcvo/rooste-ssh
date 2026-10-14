@@ -34,7 +34,71 @@ pub struct Profile {
     pub forward_agent: bool,
     /// Port forwards started with the session.
     pub tunnels: Vec<Tunnel>,
+    /// Line settings for serial profiles (the port name is in `host`).
+    pub serial: SerialSettings,
     pub notes: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Parity {
+    #[default]
+    None,
+    Odd,
+    Even,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FlowControl {
+    #[default]
+    None,
+    /// Software flow control.
+    XonXoff,
+    /// Hardware flow control.
+    RtsCts,
+}
+
+/// Serial line settings, 9600 8N1 by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SerialSettings {
+    pub baud: u32,
+    /// 5 to 8.
+    pub data_bits: u8,
+    pub parity: Parity,
+    /// 1 or 2.
+    pub stop_bits: u8,
+    pub flow_control: FlowControl,
+}
+
+impl Default for SerialSettings {
+    fn default() -> Self {
+        Self {
+            baud: 9600,
+            data_bits: 8,
+            parity: Parity::None,
+            stop_bits: 1,
+            flow_control: FlowControl::None,
+        }
+    }
+}
+
+impl SerialSettings {
+    /// Common baud rates, for pickers.
+    pub const BAUD_RATES: [u32; 12] = [
+        300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600,
+    ];
+
+    /// Short form such as `115200 8N1`.
+    pub fn describe(&self) -> String {
+        let parity = match self.parity {
+            Parity::None => 'N',
+            Parity::Odd => 'O',
+            Parity::Even => 'E',
+        };
+        format!("{} {}{parity}{}", self.baud, self.data_bits, self.stop_bits)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +205,7 @@ impl Default for Profile {
             proxy_jump: None,
             forward_agent: false,
             tunnels: Vec::new(),
+            serial: SerialSettings::default(),
             notes: String::new(),
         }
     }
@@ -208,6 +273,20 @@ mod tests {
             user: "deploy".into(),
             ..Profile::default()
         }
+    }
+
+    #[test]
+    fn serial_settings() {
+        let s = SerialSettings::default();
+        assert_eq!(s.describe(), "9600 8N1");
+        let s = SerialSettings {
+            baud: 115200,
+            parity: Parity::Even,
+            stop_bits: 2,
+            data_bits: 7,
+            ..s
+        };
+        assert_eq!(s.describe(), "115200 7E2");
     }
 
     #[test]

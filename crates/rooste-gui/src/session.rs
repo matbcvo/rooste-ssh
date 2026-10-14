@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::mpsc as std_mpsc;
 
 use futures::future::BoxFuture;
-use rooste_core::{Destination, Tunnel, TunnelKind};
+use rooste_core::{Destination, Protocol, SerialSettings, Tunnel, TunnelKind};
 use rooste_proto::Transport;
 use rooste_proto::ssh::{
     AgentSource, Auth, Forward, HostKeyPolicy, HostKeyPrompt, PtyRequest, SshClient, SshConfig,
@@ -37,6 +37,9 @@ pub struct ConnectRequest {
     /// Agent used for login and forwarding.
     pub agent: AgentSource,
     pub tunnels: Vec<Tunnel>,
+    pub protocol: Protocol,
+    /// Line settings when `protocol` is serial (`host` holds the port).
+    pub serial: SerialSettings,
 }
 
 /// How a session ended unsuccessfully.
@@ -212,6 +215,115 @@ impl HostKeyPrompt for UiPrompt {
 }
 
 async fn run(
+    request: ConnectRequest,
+    commands: mpsc::UnboundedReceiver<SessionCommand>,
+    sink: &EventSink,
+) -> Result<Option<u32>, Failure> {
+    use std::time::Duration;
+    let timeout = Duration::from_secs(15);
+    let term = "xterm-256color";
+    let (cols, rows) = (request.cols.max(1), request.rows.max(1));
+    let open_error = |e: std::io::Error| Failure::new(format!("Could not connect: {e}"));
+    match request.protocol {
+        Protocol::Ssh => run_ssh(request, commands, sink).await,
+        Protocol::Telnet => {
+            sink.send(SessionEvent::Status(format!(
+                "Connecting to {}:{}…",
+                request.host, request.port
+            )));
+            let transport = rooste_proto::telnet::TelnetTransport::connect(
+                &request.host,
+                request.port,
+                timeout,
+                term,
+                cols,
+                rows,
+            )
+            .await
+            .map_err(open_error)?;
+            pump(transport, commands, sink).await
+        }
+        Protocol::Raw => {
+            sink.send(SessionEvent::Status(format!(
+                "Connecting to {}:{}…",
+                request.host, request.port
+            )));
+            let transport =
+                rooste_proto::raw::RawTransport::connect(&request.host, request.port, timeout)
+                    .await
+                    .map_err(open_error)?;
+            pump(transport, commands, sink).await
+        }
+        Protocol::Serial => {
+            let options = serial_options(&request.serial);
+            sink.send(SessionEvent::Status(format!(
+                "Opening {} ({})…",
+                request.host,
+                request.serial.describe()
+            )));
+            let transport = rooste_proto::serial::SerialTransport::open(&request.host, options)
+                .map_err(|e| Failure::new(format!("Could not open the serial port: {e}")))?;
+            pump(transport, commands, sink).await
+        }
+    }
+}
+
+fn serial_options(settings: &SerialSettings) -> rooste_proto::serial::SerialOptions {
+    use rooste_proto::serial::{SerialFlow, SerialOptions, SerialParity};
+    SerialOptions {
+        baud: settings.baud,
+        data_bits: settings.data_bits,
+        parity: match settings.parity {
+            rooste_core::Parity::None => SerialParity::None,
+            rooste_core::Parity::Odd => SerialParity::Odd,
+            rooste_core::Parity::Even => SerialParity::Even,
+        },
+        stop_bits: settings.stop_bits,
+        flow: match settings.flow_control {
+            rooste_core::FlowControl::None => SerialFlow::None,
+            rooste_core::FlowControl::XonXoff => SerialFlow::XonXoff,
+            rooste_core::FlowControl::RtsCts => SerialFlow::RtsCts,
+        },
+    }
+}
+
+/// Run a non-SSH session: copy data both ways until it ends.
+async fn pump<T: Transport>(
+    mut transport: T,
+    mut commands: mpsc::UnboundedReceiver<SessionCommand>,
+    sink: &EventSink,
+) -> Result<Option<u32>, Failure> {
+    sink.send(SessionEvent::Connected);
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        tokio::select! {
+            read = transport.read(&mut buf) => match read {
+                Ok(0) => return Ok(None),
+                Ok(n) => sink.send(SessionEvent::Output(buf[..n].to_vec())),
+                Err(e) => return Err(Failure::lost(format!("Connection lost: {e}"))),
+            },
+            command = commands.recv() => match command {
+                Some(SessionCommand::Input(data)) => {
+                    if let Err(e) = transport.write(&data).await {
+                        return Err(Failure::lost(format!("Connection lost: {e}")));
+                    }
+                }
+                Some(SessionCommand::Resize(cols, rows)) => {
+                    let _ = transport.resize(cols, rows).await;
+                }
+                Some(SessionCommand::OpenFiles) => {
+                    sink.send(SessionEvent::FilesFailed("File transfer needs an SSH connection.".into()));
+                }
+                Some(SessionCommand::Close) | None => {
+                    let _ = transport.close().await;
+                    return Ok(None);
+                }
+            },
+        }
+    }
+}
+
+async fn run_ssh(
     request: ConnectRequest,
     mut commands: mpsc::UnboundedReceiver<SessionCommand>,
     sink: &EventSink,

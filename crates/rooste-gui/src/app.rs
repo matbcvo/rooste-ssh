@@ -83,6 +83,8 @@ impl ConnectForm {
             forward_agent: false,
             agent: AgentSource::Default,
             tunnels: Vec::new(),
+            protocol: Protocol::Ssh,
+            serial: Default::default(),
         })
     }
 }
@@ -169,6 +171,8 @@ pub struct RoosteApp {
     agent: AgentSource,
     /// The built-in SSH agent, once started.
     pub builtin_agent: Option<rooste_keys::Agent>,
+    /// Serial ports found when the profile editor opened.
+    serial_ports: Vec<String>,
     known_hosts: Option<PathBuf>,
     imports: ImportSources,
     window_title: String,
@@ -237,6 +241,7 @@ impl RoosteApp {
             broadcast: false,
             agent: AgentSource::Default,
             builtin_agent: None,
+            serial_ports: Vec::new(),
             known_hosts: None,
             imports: ImportSources::default(),
             window_title: String::new(),
@@ -344,6 +349,8 @@ impl RoosteApp {
             forward_agent: profile.forward_agent,
             agent: self.session_agent(),
             tunnels: profile.tunnels.clone(),
+            protocol: profile.protocol,
+            serial: profile.serial,
         }
     }
 
@@ -352,16 +359,6 @@ impl RoosteApp {
         let Some(profile) = self.config.profile(profile_id).cloned() else {
             return;
         };
-        if profile.protocol != Protocol::Ssh {
-            self.notify(
-                format!(
-                    "{} connections are not supported yet; only SSH is available.",
-                    dialogs::protocol_name(profile.protocol)
-                ),
-                true,
-            );
-            return;
-        }
         let request = self.request_for(&profile);
         let mut tab = SessionTab::open(
             self.runtime.handle(),
@@ -651,6 +648,7 @@ impl RoosteApp {
                     user: self.config.settings.default_user.clone(),
                     ..Profile::default()
                 };
+                self.serial_ports = rooste_proto::serial::available_ports();
                 self.dialog = Some(Dialog::EditProfile(Box::new(ProfileEditor::new(
                     profile, true,
                 ))));
@@ -658,6 +656,7 @@ impl RoosteApp {
             ManagerAction::Connect(id) => self.connect_profile(ctx, &id),
             ManagerAction::Edit(id) => {
                 if let Some(profile) = self.config.profile(&id) {
+                    self.serial_ports = rooste_proto::serial::available_ports();
                     self.dialog = Some(Dialog::EditProfile(Box::new(ProfileEditor::new(
                         profile.clone(),
                         false,
@@ -969,23 +968,25 @@ impl RoosteApp {
             return;
         };
         let keep = match &mut dialog {
-            Dialog::EditProfile(editor) => match editor.show(ctx, &self.config.folders()) {
-                Decision::Pending => true,
-                Decision::Cancel => false,
-                Decision::Accept((profile, password)) => {
-                    if profile.save_password && !password.is_empty() {
-                        if let Err(e) = self.secrets.set(&profile.id, &password) {
-                            self.notify(e, true);
+            Dialog::EditProfile(editor) => {
+                match editor.show(ctx, &self.config.folders(), &self.serial_ports) {
+                    Decision::Pending => true,
+                    Decision::Cancel => false,
+                    Decision::Accept((profile, password)) => {
+                        if profile.save_password && !password.is_empty() {
+                            if let Err(e) = self.secrets.set(&profile.id, &password) {
+                                self.notify(e, true);
+                            }
+                        } else if !profile.save_password {
+                            self.secrets.delete(&profile.id);
                         }
-                    } else if !profile.save_password {
-                        self.secrets.delete(&profile.id);
+                        self.manager.selected = Some(profile.id.clone());
+                        self.config.upsert_profile(profile);
+                        self.save_config();
+                        false
                     }
-                    self.manager.selected = Some(profile.id.clone());
-                    self.config.upsert_profile(profile);
-                    self.save_config();
-                    false
                 }
-            },
+            }
             Dialog::Settings(editor) => match editor.show(ctx) {
                 Decision::Pending => true,
                 Decision::Cancel => false,

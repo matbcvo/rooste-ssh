@@ -3,9 +3,8 @@
 A modern, memory-safe SSH client for Linux and Windows, written in Rust — with tabs, split panes,
 a session manager, built-in SFTP, key generator and agent.
 
-> **Status:** early development — M5 is done: saved sessions, tabs and split panes, port
-> forwarding, jump hosts, an SFTP file panel, a key generator, PuTTY key conversion and a
-> built-in SSH agent. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** early development — M5b is done: SSH, telnet, raw TCP and serial sessions; tabs and
+> split panes; port forwarding and jump hosts; an SFTP file panel, key tools and a built-in agent. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Building
 
@@ -56,7 +55,7 @@ cargo nextest run --workspace --run-ignored only
 | Crate | Purpose |
 |---|---|
 | `rooste-core` | Session/profile model, config, `ssh_config` and session import |
-| `rooste-proto` | `Transport` trait: SSH, later serial, telnet, raw |
+| `rooste-proto` | `Transport` trait: SSH, telnet, raw TCP and serial |
 | `rooste-term` | Terminal emulation (`alacritty_terminal`) |
 | `rooste-keys` | Key generation, `.ppk` import, agent |
 | `rooste-sftp` | SFTP over an SSH connection: listing, transfers with progress |

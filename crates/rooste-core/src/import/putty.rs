@@ -5,6 +5,7 @@
 use std::io;
 use std::path::Path;
 
+use crate::profile::{FlowControl, Parity, SerialSettings};
 use crate::{Profile, Protocol};
 
 /// Folder imported sessions are placed in.
@@ -49,11 +50,34 @@ pub fn profile_from_settings(name: &str, get: impl Fn(&str) -> Option<String>) -
         .map(|k| k.trim().to_owned())
         .filter(|k| !k.is_empty())
         .map(Into::into);
-    let notes = match (protocol, get("SerialSpeed")) {
-        (Protocol::Serial, Some(speed)) => {
-            format!("Serial speed {speed} baud (imported from PuTTY)")
-        }
-        _ => "Imported from PuTTY".into(),
+    let number = |key: &str| get(key).and_then(|v| v.trim().parse::<u32>().ok());
+    let defaults = SerialSettings::default();
+    let serial = SerialSettings {
+        baud: number("SerialSpeed")
+            .filter(|&b| b > 0)
+            .unwrap_or(defaults.baud),
+        data_bits: number("SerialDataBits")
+            .and_then(|b| u8::try_from(b).ok())
+            .filter(|b| (5..=8).contains(b))
+            .unwrap_or(defaults.data_bits),
+        // PuTTY counts stop bits in halves: 2 = one, 4 = two.
+        stop_bits: if number("SerialStopHalfbits") == Some(4) {
+            2
+        } else {
+            1
+        },
+        // PuTTY: 0 none, 1 odd, 2 even, 3 mark, 4 space (mark/space unsupported).
+        parity: match number("SerialParity") {
+            Some(1) => Parity::Odd,
+            Some(2) => Parity::Even,
+            _ => Parity::None,
+        },
+        // PuTTY: 0 none, 1 XON/XOFF, 2 RTS/CTS, 3 DSR/DTR (treated as RTS/CTS).
+        flow_control: match number("SerialFlowControl") {
+            Some(1) => FlowControl::XonXoff,
+            Some(2) | Some(3) => FlowControl::RtsCts,
+            _ => FlowControl::None,
+        },
     };
     Some(Profile {
         name,
@@ -70,7 +94,8 @@ pub fn profile_from_settings(name: &str, get: impl Fn(&str) -> Option<String>) -
             .or(user_in_host)
             .unwrap_or_default(),
         key_file,
-        notes,
+        serial,
+        notes: "Imported from PuTTY".into(),
         ..Profile::default()
     })
 }
@@ -204,12 +229,14 @@ TerminalType=xterm
 
         let s = parse_session_file(
             "console",
-            "Protocol=serial\nSerialLine=COM3\nSerialSpeed=115200\n",
+            "Protocol=serial\nSerialLine=COM3\nSerialSpeed=115200\nSerialDataBits=7\n\
+             SerialStopHalfbits=4\nSerialParity=2\nSerialFlowControl=1\n",
         )
         .unwrap();
         assert_eq!(s.protocol, Protocol::Serial);
         assert_eq!(s.host, "COM3");
-        assert!(s.notes.contains("115200"));
+        assert_eq!(s.serial.describe(), "115200 7E2");
+        assert_eq!(s.serial.flow_control, FlowControl::XonXoff);
     }
 
     #[test]
