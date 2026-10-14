@@ -31,6 +31,13 @@ pub enum FilesCommand {
         local: PathBuf,
         remote: String,
     },
+    /// Upload a local folder and everything in it (merged into the remote
+    /// folder if it exists).
+    UploadTree {
+        id: u64,
+        local: PathBuf,
+        remote: String,
+    },
     Mkdir(String),
     Remove {
         path: String,
@@ -148,6 +155,20 @@ pub fn spawn(sftp: Sftp, home: String, wake: Arc<dyn Fn() + Send + Sync>) -> Fil
                         dir: rooste_sftp::parent(&remote),
                     });
                 }
+                FilesCommand::UploadTree { id, local, remote } => {
+                    let result = upload_tree(&sftp, &local, &remote, |done, total| {
+                        send(FilesEvent::Progress { id, done, total });
+                        !is_cancelled
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .contains(&id)
+                    })
+                    .await;
+                    send(FilesEvent::Finished { id, result });
+                    send(FilesEvent::Changed {
+                        dir: rooste_sftp::parent(&remote),
+                    });
+                }
                 FilesCommand::Mkdir(path) => {
                     let result = sftp.mkdir(&path).await;
                     report(&send, &path, result);
@@ -219,6 +240,76 @@ async fn download_tree(
         }
         if let Err(e) = result {
             failed.push(format!("{remote}: {e}"));
+        }
+        finished += size;
+    }
+    progress(total, total);
+    match failed.first() {
+        None => Ok(()),
+        Some(first) => Err(format!(
+            "{} of {count} files failed, first: {first}",
+            failed.len()
+        )),
+    }
+}
+
+/// Upload the local folder `local` to `remote` (created if missing), with
+/// all its files and subfolders. Symlinked folders are skipped, as they
+/// could loop. Progress counts bytes over all files; it returns false to
+/// cancel.
+async fn upload_tree(
+    sftp: &Sftp,
+    local: &Path,
+    remote: &str,
+    mut progress: impl FnMut(u64, u64) -> bool,
+) -> Result<(), String> {
+    let local_error = |path: &Path, e: std::io::Error| format!("{}: {e}", path.display());
+    // Find every file first, so progress has a total.
+    let mut dirs = vec![(local.to_owned(), remote.to_owned())];
+    let mut files = Vec::new();
+    let mut next = 0;
+    while let Some((dir, target)) = dirs.get(next).cloned() {
+        next += 1;
+        sftp.ensure_dir(&target)
+            .await
+            .map_err(|e| format!("{target}: {e}"))?;
+        let mut entries = tokio::fs::read_dir(&dir)
+            .await
+            .map_err(|e| local_error(&dir, e))?;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| local_error(&dir, e))?
+        {
+            let path = entry.path();
+            let to = rooste_sftp::join(&target, &entry.file_name().to_string_lossy());
+            let file_type = entry.file_type().await.map_err(|e| local_error(&path, e))?;
+            if file_type.is_dir() {
+                dirs.push((path, to));
+            } else if let Ok(metadata) = tokio::fs::metadata(&path).await
+                && metadata.is_file()
+            {
+                files.push((path, to, metadata.len()));
+            }
+        }
+    }
+    let total: u64 = files.iter().map(|(_, _, size)| size).sum();
+    let count = files.len();
+    let mut finished = 0;
+    let mut failed = Vec::new();
+    for (local, remote, size) in files {
+        let mut keep_going = true;
+        let result = sftp
+            .upload(&local, &remote, |done, _| {
+                keep_going = progress(finished + done, total);
+                keep_going
+            })
+            .await;
+        if !keep_going {
+            return Err("cancelled".into());
+        }
+        if let Err(e) = result {
+            failed.push(format!("{}: {e}", local.display()));
         }
         finished += size;
     }
@@ -433,24 +524,35 @@ impl FilesPanel {
         let Some(name) = local.file_name().map(|n| n.to_string_lossy().into_owned()) else {
             return;
         };
-        if local.is_dir() {
-            self.error = Some(format!("{name}: uploading folders is not supported yet"));
-            return;
-        }
         self.next_id += 1;
-        handle.send(FilesCommand::Upload {
-            id: self.next_id,
-            local: local.to_owned(),
-            remote: rooste_sftp::join(&self.cwd, &name),
-        });
+        let id = self.next_id;
+        let remote = rooste_sftp::join(&self.cwd, &name);
+        let local = local.to_owned();
+        let (command, name, total) = if local.is_dir() {
+            let command = FilesCommand::UploadTree {
+                id,
+                local: local.clone(),
+                remote,
+            };
+            (command, format!("{name}/"), 0)
+        } else {
+            let total = std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0);
+            let command = FilesCommand::Upload {
+                id,
+                local: local.clone(),
+                remote,
+            };
+            (command, name, total)
+        };
+        handle.send(command);
         self.transfers.push(Transfer {
-            id: self.next_id,
+            id,
             name,
             direction: Direction::Upload,
             done: 0,
-            total: std::fs::metadata(local).map(|m| m.len()).unwrap_or(0),
+            total,
             state: TransferState::Running,
-            local: local.to_owned(),
+            local,
         });
     }
 
@@ -509,6 +611,12 @@ impl FilesPanel {
             self.upload(&path);
         }
         self.picker.poll();
+        for path in self.picker.take_all(PickId::UploadFiles) {
+            self.upload(&path);
+        }
+        if let Some(path) = self.picker.take(PickId::UploadFolder) {
+            self.upload(&path);
+        }
         if let Some(dir) = self.picker.take(PickId::DownloadTo) {
             for entry in std::mem::take(&mut self.pending_download) {
                 self.download_into(&entry, &dir);
@@ -568,6 +676,24 @@ impl FilesPanel {
                 .clicked()
             {
                 self.download_selected_to(ui.ctx());
+            }
+            let idle = !self.picker.is_busy();
+            let start = self.download_dir.display().to_string();
+            if ui
+                .add_enabled(idle, egui::Button::new("Upload…"))
+                .on_hover_text("Choose files to upload here")
+                .clicked()
+            {
+                self.picker
+                    .open(ui.ctx(), PickId::UploadFiles, PickKind::OpenFiles, &start);
+            }
+            if ui
+                .add_enabled(idle, egui::Button::new("Upload folder…"))
+                .on_hover_text("Choose a folder to upload here, with everything in it")
+                .clicked()
+            {
+                self.picker
+                    .open(ui.ctx(), PickId::UploadFolder, PickKind::Folder, &start);
             }
             if ui
                 .add_enabled(selected.is_some(), egui::Button::new("Rename"))
@@ -683,7 +809,7 @@ impl FilesPanel {
 
         ui.separator();
         ui.weak(format!(
-            "Drop files here to upload. Ctrl- or Shift-click to select several. Downloads go to {}.",
+            "Drop files or folders here to upload. Ctrl- or Shift-click to select several. Downloads go to {}.",
             self.download_dir.display()
         ));
         let mut cancel = None;

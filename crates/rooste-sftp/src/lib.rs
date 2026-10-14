@@ -158,6 +158,14 @@ impl Sftp {
         Ok(self.session.create_dir(path).await?)
     }
 
+    /// Create the folder `path` unless it already exists.
+    pub async fn ensure_dir(&self, path: &str) -> Result<(), SftpError> {
+        match self.session.metadata(path).await {
+            Ok(metadata) if metadata.is_dir() => Ok(()),
+            _ => self.mkdir(path).await,
+        }
+    }
+
     pub async fn remove_file(&self, path: &str) -> Result<(), SftpError> {
         Ok(self.session.remove_file(path).await?)
     }

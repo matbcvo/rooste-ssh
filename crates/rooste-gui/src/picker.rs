@@ -18,11 +18,16 @@ pub enum PickId {
     DownloadDir,
     /// "Download to…" in the file panel.
     DownloadTo,
+    /// "Upload…" and "Upload folder…" in the file panel.
+    UploadFiles,
+    UploadFolder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickKind {
     OpenFile,
+    /// One or more files.
+    OpenFiles,
     SaveFile,
     Folder,
 }
@@ -30,8 +35,8 @@ pub enum PickKind {
 #[derive(Debug)]
 pub struct Picker {
     runtime: tokio::runtime::Handle,
-    pending: Option<(PickId, oneshot::Receiver<Option<PathBuf>>)>,
-    ready: Option<(PickId, PathBuf)>,
+    pending: Option<(PickId, oneshot::Receiver<Vec<PathBuf>>)>,
+    ready: Option<(PickId, Vec<PathBuf>)>,
     /// Tests: answer every dialog with this path instead of opening one.
     pub fake_answer: Option<PathBuf>,
 }
@@ -51,7 +56,7 @@ impl Picker {
         if let Some((id, rx)) = &mut self.pending {
             match rx.try_recv() {
                 Ok(answer) => {
-                    self.ready = answer.map(|path| (*id, path));
+                    self.ready = (!answer.is_empty()).then_some((*id, answer));
                     self.pending = None;
                 }
                 Err(oneshot::error::TryRecvError::Empty) => {}
@@ -85,11 +90,17 @@ impl Picker {
 
     /// The chosen path for `id`, once, after its dialog closes.
     pub fn take(&mut self, id: PickId) -> Option<PathBuf> {
+        self.take_all(id).into_iter().next()
+    }
+
+    /// All chosen paths for `id` (several for [`PickKind::OpenFiles`]),
+    /// once, after its dialog closes; empty until then.
+    pub fn take_all(&mut self, id: PickId) -> Vec<PathBuf> {
         match self.ready.take() {
-            Some((ready, path)) if ready == id => Some(path),
+            Some((ready, paths)) if ready == id => paths,
             other => {
                 self.ready = other;
-                None
+                Vec::new()
             }
         }
     }
@@ -106,7 +117,7 @@ impl Picker {
             return;
         }
         if let Some(path) = self.fake_answer.clone() {
-            self.ready = Some((id, path));
+            self.ready = Some((id, vec![path]));
             return;
         }
         let start = start_dir(current, id);
@@ -121,16 +132,18 @@ impl Picker {
                 dialog = dialog.set_directory(dir);
             }
             let answer = match kind {
-                PickKind::OpenFile => dialog.pick_file().await,
-                PickKind::Folder => dialog.pick_folder().await,
+                PickKind::OpenFile => dialog.pick_file().await.into_iter().collect(),
+                PickKind::OpenFiles => dialog.pick_files().await.unwrap_or_default(),
+                PickKind::Folder => dialog.pick_folder().await.into_iter().collect(),
                 PickKind::SaveFile => {
                     if let Some(name) = file_name {
                         dialog = dialog.set_file_name(name);
                     }
-                    dialog.save_file().await
+                    dialog.save_file().await.into_iter().collect()
                 }
             };
-            let _ = tx.send(answer.map(|handle| handle.path().to_owned()));
+            let paths: Vec<PathBuf> = answer.iter().map(|h| h.path().to_owned()).collect();
+            let _ = tx.send(paths);
             ctx.request_repaint();
         });
         self.pending = Some((id, rx));
@@ -149,7 +162,15 @@ fn start_dir(current: &str, id: PickId) -> Option<PathBuf> {
     dir.or_else(|| {
         let home = std::env::home_dir()?;
         let ssh = home.join(".ssh");
-        let key_file = !matches!(id, PickId::DownloadDir | PickId::DownloadTo);
+        let key_file = matches!(
+            id,
+            PickId::QuickKeyFile
+                | PickId::ProfileKeyFile
+                | PickId::KeyGenSave
+                | PickId::ConvertInput
+                | PickId::ConvertOutput
+                | PickId::AgentKeyFile
+        );
         Some(if key_file && ssh.is_dir() { ssh } else { home })
     })
 }
