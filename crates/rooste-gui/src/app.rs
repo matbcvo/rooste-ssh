@@ -774,6 +774,7 @@ impl RoosteApp {
         if self.show_manager {
             let mut action = None;
             egui::Panel::left("session-manager")
+                .frame(theme::side_panel_frame(&ctx))
                 .resizable(true)
                 .default_size(240.0)
                 .show(ui, |ui| {

@@ -449,6 +449,7 @@ impl SessionTab {
         if let Some(files) = &mut self.files {
             files.poll();
             egui::Panel::right(panel_id)
+                .frame(crate::theme::side_panel_frame(ui.ctx()))
                 .resizable(true)
                 .default_size(320.0)
                 .show(ui, |ui| files.ui(ui));
