@@ -15,6 +15,7 @@ use crate::palette::{self as command_palette, Command};
 use crate::session::ConnectRequest;
 use crate::tab::{SessionTab, TabAction};
 use crate::theme;
+use crate::tools::{AgentAction, AgentWindow, KeyConverter, KeyGenerator};
 
 pub use crate::tab::TabState;
 
@@ -95,6 +96,9 @@ pub enum Dialog {
     CloseTab(TileId),
     QuickConnect,
     Palette { query: String },
+    KeyGenerator(Box<KeyGenerator>),
+    KeyConverter(Box<KeyConverter>),
+    Agent(Box<AgentWindow>),
 }
 
 /// A message in the status bar.
@@ -163,6 +167,8 @@ pub struct RoosteApp {
     /// Input in one tab goes to all connected tabs.
     pub broadcast: bool,
     agent: AgentSource,
+    /// The built-in SSH agent, once started.
+    pub builtin_agent: Option<rooste_keys::Agent>,
     known_hosts: Option<PathBuf>,
     imports: ImportSources,
     window_title: String,
@@ -230,6 +236,7 @@ impl RoosteApp {
             show_manager: true,
             broadcast: false,
             agent: AgentSource::Default,
+            builtin_agent: None,
             known_hosts: None,
             imports: ImportSources::default(),
             window_title: String::new(),
@@ -335,7 +342,7 @@ impl RoosteApp {
             prompt_for_password: true,
             proxy_jump: profile.proxy_jump.clone(),
             forward_agent: profile.forward_agent,
-            agent: self.agent.clone(),
+            agent: self.session_agent(),
             tunnels: profile.tunnels.clone(),
         }
     }
@@ -430,6 +437,74 @@ impl RoosteApp {
         self.tree.remove_recursively(id);
     }
 
+    /// The agent offered to sessions.
+    fn session_agent(&self) -> AgentSource {
+        match &self.builtin_agent {
+            Some(agent) if self.config.settings.use_builtin_agent => {
+                AgentSource::Path(agent.path().to_owned())
+            }
+            _ => self.agent.clone(),
+        }
+    }
+
+    fn agent_action(&mut self, window: &mut AgentWindow, action: AgentAction) {
+        window.error = None;
+        let result: Result<(), String> = match action {
+            AgentAction::Start => self
+                .runtime
+                .block_on(rooste_keys::Agent::start(None))
+                .map(|agent| self.builtin_agent = Some(agent))
+                .map_err(|e| format!("Could not start the agent: {e}")),
+            AgentAction::Stop => {
+                self.builtin_agent = None;
+                window.keys.clear();
+                Ok(())
+            }
+            AgentAction::Load => (|| {
+                let agent = self
+                    .builtin_agent
+                    .as_ref()
+                    .ok_or("The agent is not running.")?;
+                let path = rooste_core::expand_tilde(window.key_file.trim());
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                let passphrase =
+                    (!window.passphrase.is_empty()).then_some(window.passphrase.as_str());
+                let key = rooste_keys::load(&text, passphrase).map_err(|e| e.to_string())?;
+                self.runtime
+                    .block_on(agent.add(&key))
+                    .map_err(|e| e.to_string())?;
+                window.key_file.clear();
+                window.passphrase.clear();
+                Ok(())
+            })(),
+            AgentAction::Remove(fingerprint) => (|| {
+                let agent = self
+                    .builtin_agent
+                    .as_ref()
+                    .ok_or("The agent is not running.")?;
+                let key = window
+                    .keys
+                    .iter()
+                    .find(|k| rooste_keys::fingerprint(k) == fingerprint)
+                    .ok_or("No such key.")?;
+                self.runtime
+                    .block_on(agent.remove(key))
+                    .map_err(|e| e.to_string())
+            })(),
+            AgentAction::Refresh => Ok(()),
+        };
+        if let Err(e) = result {
+            window.error = Some(e);
+        }
+        if let Some(agent) = &self.builtin_agent {
+            match self.runtime.block_on(agent.keys()) {
+                Ok(keys) => window.keys = keys,
+                Err(e) => window.error = Some(e.to_string()),
+            }
+        }
+    }
+
     /// A new tab connecting like the active one.
     pub fn duplicate_active(&mut self) {
         let settings = self.config.settings.clone();
@@ -506,6 +581,13 @@ impl RoosteApp {
                 }))
             }
             Command::DuplicateTab => self.duplicate_active(),
+            Command::ToggleFiles => {
+                if let Some(id) = self.active_tab_id()
+                    && let Some(tab) = self.tab_mut(id)
+                {
+                    tab.toggle_files();
+                }
+            }
             Command::SplitRight => self.split_active(LinearDir::Horizontal),
             Command::SplitDown => self.split_active(LinearDir::Vertical),
             Command::ToggleBroadcast => self.toggle_broadcast(),
@@ -726,6 +808,7 @@ impl RoosteApp {
                 ui.menu_button("Tab", |ui| {
                     let has_tab = self.active_tab_id().is_some();
                     for (label, command) in [
+                        ("Files (SFTP)", Command::ToggleFiles),
                         ("Duplicate tab", Command::DuplicateTab),
                         ("Split right", Command::SplitRight),
                         ("Split down", Command::SplitDown),
@@ -749,6 +832,22 @@ impl RoosteApp {
                         .clicked()
                     {
                         self.run_command(&ctx, Command::CloseTab);
+                        ui.close();
+                    }
+                });
+                ui.menu_button("Tools", |ui| {
+                    if ui.button("Key generator…").clicked() {
+                        self.dialog = Some(Dialog::KeyGenerator(Box::default()));
+                        ui.close();
+                    }
+                    if ui.button("Convert key (PuTTY / OpenSSH)…").clicked() {
+                        self.dialog = Some(Dialog::KeyConverter(Box::default()));
+                        ui.close();
+                    }
+                    if ui.button("SSH agent…").clicked() {
+                        let mut window = AgentWindow::default();
+                        self.agent_action(&mut window, AgentAction::Refresh);
+                        self.dialog = Some(Dialog::Agent(Box::new(window)));
                         ui.close();
                     }
                 });
@@ -948,6 +1047,21 @@ impl RoosteApp {
                         false
                     }
                 }
+            }
+            Dialog::KeyGenerator(generator) => generator.show(ctx) == Decision::Pending,
+            Dialog::KeyConverter(converter) => converter.show(ctx) == Decision::Pending,
+            Dialog::Agent(window) => {
+                let mut use_agent = self.config.settings.use_builtin_agent;
+                let (decision, action) =
+                    window.show(ctx, self.builtin_agent.as_ref(), &mut use_agent);
+                if use_agent != self.config.settings.use_builtin_agent {
+                    self.config.settings.use_builtin_agent = use_agent;
+                    self.save_config();
+                }
+                if let Some(action) = action {
+                    self.agent_action(window, action);
+                }
+                decision == Decision::Pending
             }
             Dialog::QuickConnect => {
                 let mut keep = true;

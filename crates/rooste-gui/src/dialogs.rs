@@ -320,6 +320,13 @@ impl SettingsEditor {
                         .response
                     });
                     text(ui, "Default user", &mut s.default_user);
+                    labeled(ui, "Download folder", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut s.download_dir)
+                                .hint_text("~/Downloads")
+                                .desired_width(300.0),
+                        )
+                    });
                     labeled(ui, "", |ui| {
                         ui.checkbox(&mut s.copy_on_select, "Copy text when selected")
                     });

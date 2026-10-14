@@ -14,6 +14,7 @@
 mod agent;
 mod echo;
 mod server;
+mod sftp;
 
 use std::io::{self, BufRead, BufReader};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};

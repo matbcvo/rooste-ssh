@@ -39,6 +39,9 @@ pub use russh::keys::{PrivateKey, PublicKey};
 
 use crate::Transport;
 
+/// Byte stream of a subsystem channel.
+pub type SubsystemStream = russh::ChannelStream<Msg>;
+
 /// Errors from connecting, authenticating or using an SSH session.
 #[derive(Debug, thiserror::Error)]
 pub enum SshError {
@@ -92,10 +95,21 @@ pub enum SshError {
 pub fn load_private_key(path: &Path, passphrase: Option<&str>) -> Result<PrivateKey, SshError> {
     keys::load_secret_key(path, passphrase).map_err(|e| match e {
         keys::Error::KeyIsEncrypted => SshError::KeyEncrypted(path.to_owned()),
+        // PuTTY keys report encryption through ssh-key's own error type.
+        _ if passphrase.is_none() && is_encrypted_ppk(path) => {
+            SshError::KeyEncrypted(path.to_owned())
+        }
         source => SshError::Key {
             path: path.to_owned(),
             source,
         },
+    })
+}
+
+fn is_encrypted_ppk(path: &Path) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|text| {
+        text.starts_with("PuTTY-User-Key-File-")
+            && text.lines().any(|l| l.trim() == "Encryption: aes256-cbc")
     })
 }
 
@@ -564,6 +578,13 @@ impl SshClient {
             channel.agent_forward(false).await?;
         }
         Ok(())
+    }
+
+    /// Open a channel running a subsystem such as `sftp`.
+    pub async fn open_subsystem(&self, name: &str) -> Result<SubsystemStream, SshError> {
+        let channel = self.handle.channel_open_session().await?;
+        channel.request_subsystem(true, name).await?;
+        Ok(channel.into_stream())
     }
 
     /// Run a command without a terminal and collect its output.

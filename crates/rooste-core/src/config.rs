@@ -38,6 +38,10 @@ pub struct Settings {
     pub default_user: String,
     /// Reconnect automatically when a connection drops.
     pub auto_reconnect: bool,
+    /// Folder for SFTP downloads; empty means `~/Downloads`.
+    pub download_dir: String,
+    /// Offer the built-in agent's keys to rooste-ssh's own sessions.
+    pub use_builtin_agent: bool,
 }
 
 impl Default for Settings {
@@ -50,6 +54,8 @@ impl Default for Settings {
             confirm_close: true,
             default_user: String::new(),
             auto_reconnect: true,
+            download_dir: String::new(),
+            use_builtin_agent: false,
         }
     }
 }

@@ -130,9 +130,17 @@ fn last<'a>(harness: &'a Harness<'_, RoosteApp>, label: &'a str) -> egui_kittest
         .unwrap_or_else(|| panic!("no widget labeled {label:?}"))
 }
 
-fn type_into(harness: &mut Harness<'_, RoosteApp>, label: &str, text: &str) {
-    last(harness, label).focus();
+/// Move the pointer onto a widget, then click it, as a mouse user would.
+/// (A click without a preceding hover can be ignored by egui.)
+fn click(harness: &mut Harness<'_, RoosteApp>, label: &str) {
+    last(harness, label).hover();
     settle(harness);
+    last(harness, label).click();
+    settle(harness);
+}
+
+fn type_into(harness: &mut Harness<'_, RoosteApp>, label: &str, text: &str) {
+    click(harness, label);
     last(harness, label).type_text(text);
     settle(harness);
 }
@@ -145,6 +153,8 @@ fn open_menu_item(harness: &mut Harness<'_, RoosteApp>, menu: &str, item: &str) 
 }
 
 fn context_menu(harness: &mut Harness<'_, RoosteApp>, profile: &str, item: &str) {
+    harness.get_by_label(profile).hover();
+    settle(harness);
     harness.get_by_label(profile).click_secondary();
     settle(harness);
     // The welcome screen also has a "Connect" button; the menu item is last.
@@ -791,4 +801,219 @@ fn tunnel_editor_validates() {
     assert!(harness.state().dialog.is_none());
     let saved = f.saved_config();
     assert_eq!(saved.profiles[0].tunnels[0].target, "nohost:5432");
+}
+
+// ---- M5: built-in tools ----------------------------------------------------
+
+/// A file dropped onto the window (egui only defines the trait).
+#[derive(Debug)]
+struct Dropped(PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
+fn files_entries(app: &RoosteApp) -> Vec<String> {
+    first_tab(app)
+        .and_then(|t| t.files.as_ref())
+        .map(|f| f.entries.iter().map(|e| e.name.clone()).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn file_panel_browse_transfer_and_manage() {
+    let f = Fixture::with_server();
+    let root = f.server.as_ref().unwrap().sftp_root().to_owned();
+    std::fs::create_dir(root.join("logs")).unwrap();
+    std::fs::write(root.join("logs").join("app.log"), "log line\n").unwrap();
+    std::fs::write(root.join("notes.txt"), "remote notes").unwrap();
+    let downloads = f.dir.path().join("downloads");
+    std::fs::create_dir(&downloads).unwrap();
+    let mut config = Config::default();
+    config.settings.download_dir = downloads.display().to_string();
+    config.profiles = vec![Profile {
+        save_password: true,
+        ..f.profile("files")
+    }];
+    let id = config.profiles[0].id.clone();
+    let app = f.app(config);
+    app.secrets().set(&id, TEST_PASSWORD).unwrap();
+    let mut harness = harness(app);
+    context_menu(&mut harness, "files", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+
+    open_menu_item(&mut harness, "Tab", "Files (SFTP)");
+    wait_for(&mut harness, "listing", |app| {
+        files_entries(app) == ["logs", "notes.txt"]
+    });
+
+    // Select a file and download it with the toolbar button.
+    click(&mut harness, "📄 notes.txt  (12 B)");
+    click(&mut harness, "Download");
+    wait_for(&mut harness, "download", |_| {
+        downloads.join("notes.txt").exists()
+    });
+    assert_eq!(
+        std::fs::read_to_string(downloads.join("notes.txt")).unwrap(),
+        "remote notes"
+    );
+
+    // Open a folder.
+    click(&mut harness, "📁 logs");
+    click(&mut harness, "Open");
+    settle(&mut harness);
+    wait_for(&mut harness, "logs folder", |app| {
+        files_entries(app) == ["app.log"]
+    });
+    click(&mut harness, "⬆");
+    wait_for(&mut harness, "back up", |app| files_entries(app).len() == 2);
+
+    // Upload by dropping a file onto the window.
+    let local = f.dir.path().join("upload.txt");
+    std::fs::write(&local, "from here").unwrap();
+    harness
+        .input_mut()
+        .dropped_files
+        .push(Arc::new(Dropped(local.clone())));
+    settle(&mut harness);
+    wait_for(&mut harness, "upload", |app| {
+        files_entries(app).contains(&"upload.txt".to_owned())
+    });
+    assert_eq!(
+        std::fs::read_to_string(root.join("upload.txt")).unwrap(),
+        "from here"
+    );
+
+    // New folder, rename and delete.
+    click(&mut harness, "New folder");
+    type_into(&mut harness, "Folder name", "made-here");
+    click(&mut harness, "Create");
+    wait_for(&mut harness, "mkdir", |app| {
+        root.join("made-here").is_dir() && files_entries(app).contains(&"made-here".to_owned())
+    });
+
+    click(&mut harness, "📄 upload.txt  (9 B)");
+    click(&mut harness, "Rename");
+    type_into(&mut harness, "New name", "-2");
+    click(&mut harness, "Rename");
+    wait_for(&mut harness, "rename", |app| {
+        root.join("upload.txt-2").exists()
+            && files_entries(app).contains(&"upload.txt-2".to_owned())
+    });
+
+    click(&mut harness, "📄 upload.txt-2  (9 B)");
+    click(&mut harness, "Delete");
+    harness.get_by_label("Delete upload.txt-2?");
+    click(&mut harness, "Delete");
+    wait_for(&mut harness, "delete", |_| {
+        !root.join("upload.txt-2").exists()
+    });
+}
+
+#[test]
+fn key_generator_saves_a_key_pair() {
+    let f = Fixture::new();
+    let mut harness = harness(f.app(Config::default()));
+    open_menu_item(&mut harness, "Tools", "Key generator…");
+    let path = f.dir.path().join("keys").join("id_test");
+    let Some(Dialog::KeyGenerator(generator)) = &mut harness.state_mut().dialog else {
+        panic!("key generator not open");
+    };
+    generator.path.clear();
+    generator.comment.clear();
+    type_into(&mut harness, "Save as", &path.display().to_string());
+    type_into(&mut harness, "Comment", "made by the test");
+    type_into(&mut harness, "Passphrase", "secret");
+    type_into(&mut harness, "Repeat passphrase", "different");
+    harness.get_by_label("Generate").click();
+    settle(&mut harness);
+    harness.get_by_label("The passphrases do not match.");
+
+    let Some(Dialog::KeyGenerator(generator)) = &mut harness.state_mut().dialog else {
+        unreachable!()
+    };
+    generator.confirm = "secret".into();
+    harness.get_by_label("Generate").click();
+    settle(&mut harness);
+    harness.get_by_label("Copy public key");
+    let private = std::fs::read_to_string(&path).unwrap();
+    let key = rooste_keys::load(&private, Some("secret")).unwrap();
+    let public = std::fs::read_to_string(path.with_file_name("id_test.pub")).unwrap();
+    assert!(public.starts_with("ssh-ed25519 ") && public.trim_end().ends_with("made by the test"));
+    assert_eq!(
+        rooste_keys::PublicKey::from_openssh(public.trim()).unwrap(),
+        *key.public_key()
+    );
+}
+
+#[test]
+fn key_converter_turns_ppk_into_openssh() {
+    let f = Fixture::new();
+    let mut harness = harness(f.app(Config::default()));
+    open_menu_item(&mut harness, "Tools", "Convert key (PuTTY / OpenSSH)…");
+    let input = rooste_testkit::key_path("ppk").join("v3-ed25519-encrypted.ppk");
+    let output = f.dir.path().join("converted");
+    type_into(&mut harness, "Key file", &input.display().to_string());
+    type_into(
+        &mut harness,
+        "Passphrase",
+        rooste_testkit::TEST_KEY_PASSPHRASE,
+    );
+    let Some(Dialog::KeyConverter(converter)) = &mut harness.state_mut().dialog else {
+        panic!("converter not open");
+    };
+    converter.output = output.display().to_string();
+    harness.get_by_label("Convert").click();
+    settle(&mut harness);
+    harness.get_by_label(&format!("Saved an OpenSSH key to {}.", output.display()));
+    let text = std::fs::read_to_string(&output).unwrap();
+    assert!(text.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"));
+    rooste_keys::load(&text, None).unwrap();
+}
+
+#[test]
+fn builtin_agent_logs_into_sessions() {
+    let f = Fixture::with_server();
+    let mut harness = harness(f.app(Config {
+        profiles: vec![Profile {
+            use_agent: true,
+            ..f.profile("agent login")
+        }],
+        ..Config::default()
+    }));
+    open_menu_item(&mut harness, "Tools", "SSH agent…");
+    harness.get_by_label("Start agent").click();
+    settle(&mut harness);
+    assert!(harness.state().builtin_agent.is_some());
+    type_into(
+        &mut harness,
+        "Key file",
+        &rooste_testkit::key_path("id_ed25519").display().to_string(),
+    );
+    harness.get_by_label("Load key").click();
+    settle(&mut harness);
+    harness
+        .get_by_label("Use this agent for rooste-ssh sessions")
+        .click();
+    settle(&mut harness);
+    let Some(Dialog::Agent(window)) = &harness.state().dialog else {
+        panic!("agent window closed");
+    };
+    assert_eq!(window.keys.len(), 1, "{:?}", window.error);
+    harness.get_by_label("Close").click();
+    settle(&mut harness);
+    assert!(harness.state().config.settings.use_builtin_agent);
+
+    // No password is saved, so only the agent can log in.
+    context_menu(&mut harness, "agent login", "Connect");
+    wait_for(&mut harness, "connected via the built-in agent", |app| {
+        connected_count(app) == 1
+    });
+    assert!(first_tab(harness.state()).unwrap().prompt.is_none());
 }

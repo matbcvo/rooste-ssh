@@ -19,8 +19,9 @@ everything needed for daily remote work in one app.
 ### Interoperability
 
 For people coming from other clients: import saved sessions from PuTTY (Windows registry,
-`~/.putty/sessions`), import `.ppk` keys, and serve existing Pageant clients from the built-in
-agent on Windows.
+`~/.putty/sessions`), use `.ppk` keys directly or convert them, and log in with keys held by a
+running Pageant. (The built-in agent speaks the OpenSSH agent protocol; serving Pageant's own
+protocol to other programs is planned for later.)
 
 ## Decisions
 
@@ -122,10 +123,15 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
   the tunnel editor; nightly interop against OpenSSH 9.3 / current / edge, Dropbear, and a
   legacy-only server.
 
-### M5 — Built-in tools
+### M5 — Built-in tools ✅
 - SFTP browser with drag and drop.
 - Key generator, `.ppk` import/export.
 - Built-in SSH agent.
+- Done: file panel per tab (browse, download with progress and cancel, upload by drag and drop,
+  new folder, rename, delete); key generator (Ed25519, ECDSA P-256, RSA 3072/4096, optional
+  passphrase); PuTTY ⇄ OpenSSH key converter (PPK v2/v3 import, v3 export checked with
+  PuTTYgen 0.83); built-in agent on a Unix socket or named pipe, usable by rooste-ssh sessions
+  and other programs. `.ppk` keys also work directly as profile key files.
 
 ### M5b — Extra protocols
 - **Raw TCP:** plain `tokio` TCP stream.
@@ -139,7 +145,8 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
 - `release.yml` with smoke tests of the packaged binaries; update check.
 
 ### Later
-Session logging and recording, FIDO2 (`sk-ed25519`) keys, X11 forwarding, scripting or plugins,
+Serving Pageant's protocol from the built-in agent (Windows), folder uploads in the file panel,
+session logging and recording, FIDO2 (`sk-ed25519`) keys, X11 forwarding, scripting or plugins,
 macOS.
 
 ## Testing strategy

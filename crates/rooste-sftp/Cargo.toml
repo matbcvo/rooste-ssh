@@ -9,5 +9,15 @@ repository.workspace = true
 authors.workspace = true
 publish = false
 
+[dependencies]
+rooste-proto.workspace = true
+russh-sftp.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+rooste-testkit.workspace = true
+tempfile.workspace = true
+
 [lints]
 workspace = true

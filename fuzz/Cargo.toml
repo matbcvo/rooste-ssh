@@ -13,6 +13,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 rooste-core = { path = "../crates/rooste-core" }
+rooste-keys = { path = "../crates/rooste-keys" }
 rooste-term = { path = "../crates/rooste-term" }
 
 [[bin]]
@@ -36,5 +37,11 @@ doc = false
 [[bin]]
 name = "destination"
 path = "fuzz_targets/destination.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ppk"
+path = "fuzz_targets/ppk.rs"
 test = false
 doc = false

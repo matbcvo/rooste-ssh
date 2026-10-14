@@ -106,7 +106,10 @@ impl TerminalView {
         let id = response.id;
         // Take keyboard focus when clicked, and whenever nothing else has it
         // (e.g. after a dialog closes).
-        let nothing_focused = ui.memory(|m| m.focused().is_none());
+        // A click elsewhere may be giving another widget focus this frame
+        // (egui applies it at the end of the frame), so don't take it then.
+        let nothing_focused = ui.memory(|m| m.focused().is_none())
+            && !ui.input(|i| i.pointer.any_pressed() || i.pointer.any_released());
         if nothing_focused || response.clicked() || response.drag_started() {
             ui.memory_mut(|m| m.request_focus(id));
         }

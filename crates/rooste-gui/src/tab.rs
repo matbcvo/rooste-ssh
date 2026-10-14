@@ -8,6 +8,7 @@ use rooste_proto::ssh::UnknownHostKey;
 use rooste_term::{Palette, TermEvent, Terminal};
 use tokio::sync::oneshot;
 
+use crate::files::FilesPanel;
 use crate::session::{
     ConnectRequest, Failure, PromptKind, Session, SessionCommand, SessionEvent, TunnelStatus,
 };
@@ -54,6 +55,9 @@ pub enum TabAction {
 
 #[derive(Debug)]
 pub struct SessionTab {
+    /// Unique and stable for the tab's lifetime (egui_tiles moves panes in
+    /// memory, so addresses cannot serve as widget ids).
+    pub id: u64,
     /// Name of the saved profile, or `user@host`.
     pub name: String,
     /// Title set by the remote application, if any.
@@ -74,6 +78,9 @@ pub struct SessionTab {
     /// Why the last attempt failed, when it did.
     pub failure: Option<Failure>,
     pub prompt: Option<PendingPrompt>,
+    /// The SFTP side panel, when shown.
+    pub files: Option<FilesPanel>,
+    download_dir: std::path::PathBuf,
     session: Session,
     host_key: Option<(UnknownHostKey, oneshot::Sender<bool>)>,
     /// Grid size the server was last told about.
@@ -94,7 +101,9 @@ impl SessionTab {
     ) -> Self {
         let mut view = TerminalView::default();
         theme::apply_to_view(&mut view, settings);
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self {
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             name,
             remote_title: None,
             state: TabState::Connecting("Connecting…".into()),
@@ -116,6 +125,8 @@ impl SessionTab {
             auto_reconnect: settings.auto_reconnect,
             failure: None,
             prompt: None,
+            files: None,
+            download_dir: crate::theme::download_dir(settings),
             host_key: None,
             reconnects: 0,
             runtime: runtime.clone(),
@@ -157,6 +168,20 @@ impl SessionTab {
         self.state = TabState::Connecting("Connecting…".into());
         self.failure = None;
         self.tunnels.clear();
+        // The SFTP session belonged to the old connection.
+        if self.files.is_some() {
+            self.files = Some(FilesPanel::new(self.download_dir.clone()));
+        }
+    }
+
+    /// Show or hide the SFTP file panel.
+    pub fn toggle_files(&mut self) {
+        if self.files.take().is_none() {
+            self.files = Some(FilesPanel::new(self.download_dir.clone()));
+            if self.state == TabState::Connected {
+                self.session.send(SessionCommand::OpenFiles);
+            }
+        }
     }
 
     /// Title for the tab bar.
@@ -205,6 +230,10 @@ impl SessionTab {
         self.terminal.set_palette(theme::palette(settings.theme));
         self.terminal.set_scrollback(settings.scrollback_lines);
         self.auto_reconnect = settings.auto_reconnect;
+        self.download_dir = crate::theme::download_dir(settings);
+        if let Some(files) = &mut self.files {
+            files.download_dir = self.download_dir.clone();
+        }
     }
 
     pub fn palette(&self) -> Palette {
@@ -278,6 +307,19 @@ impl SessionTab {
                     }
                     self.reconnects = 0;
                     self.state = TabState::Connected;
+                    if self.files.is_some() {
+                        self.session.send(SessionCommand::OpenFiles);
+                    }
+                }
+                SessionEvent::Files(handle) => {
+                    if let Some(files) = &mut self.files {
+                        files.attach(handle);
+                    }
+                }
+                SessionEvent::FilesFailed(message) => {
+                    if let Some(files) = &mut self.files {
+                        files.error = Some(message);
+                    }
                 }
                 SessionEvent::Tunnels(statuses) => self.tunnels = statuses,
                 SessionEvent::Output(bytes) => self.terminal.advance(&bytes),
@@ -402,6 +444,14 @@ impl SessionTab {
                     }
                 }
             });
+        }
+        let panel_id = egui::Id::new(("files", self.id));
+        if let Some(files) = &mut self.files {
+            files.poll();
+            egui::Panel::right(panel_id)
+                .resizable(true)
+                .default_size(320.0)
+                .show(ui, |ui| files.ui(ui));
         }
         let out = self.view.show(ui, &mut self.terminal);
         if self.state == TabState::Connected {
