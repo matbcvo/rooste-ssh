@@ -85,14 +85,14 @@ fn export_for_puttygen() {
         ("ed25519", rooste_keys::KeyType::Ed25519),
         ("ecdsa", rooste_keys::KeyType::EcdsaP256),
     ] {
-        let key = rooste_keys::generation::generate(kind, &format!("exported-{name}")).unwrap();
+        let key = rooste_keys::generate(kind, &format!("exported-{name}")).unwrap();
         for (suffix, passphrase) in [("plain", None), ("encrypted", Some("rooste"))] {
             let text = ppk::export(&key, passphrase).unwrap();
             std::fs::write(dir.join(format!("{name}-{suffix}.ppk")), text).unwrap();
         }
         std::fs::write(
             dir.join(format!("{name}.pub")),
-            rooste_keys::generation::public_line(key.public_key()),
+            rooste_keys::public_line(key.public_key()),
         )
         .unwrap();
     }
@@ -105,7 +105,7 @@ fn export_for_puttygen() {
     .unwrap();
     std::fs::write(
         dir.join("rsa.pub"),
-        rooste_keys::generation::public_line(rsa.public_key()),
+        rooste_keys::public_line(rsa.public_key()),
     )
     .unwrap();
 }
