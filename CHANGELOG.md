@@ -4,6 +4,18 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-10-14
+
+### Changed
+
+- The project moved to its own organization:
+  [github.com/rooste-ssh/rooste-ssh](https://github.com/rooste-ssh/rooste-ssh). Old links
+  redirect; the update check now asks the new address.
+- The Linux app ID is now `ee.prica.rooste-ssh` (it was `io.github.matbcvo.rooste-ssh`) and no
+  longer depends on where the repository lives. If you installed the 0.1.0 Flatpak, uninstall it
+  and install this one; other packages and the Windows installer upgrade as usual. Settings,
+  saved sessions and saved passwords are kept.
+
 ## [0.1.0] - 2026-10-14
 
 The first release.
@@ -45,4 +57,5 @@ The first release.
 - Windows MSI installer and portable zip; Linux `.deb`, `.rpm`, AppImage, `.tar.gz` and Flatpak.
 - Optional check for new releases at startup.
 
-[0.1.0]: https://github.com/matbcvo/rooste-ssh/releases/tag/v0.1.0
+[0.1.1]: https://github.com/rooste-ssh/rooste-ssh/releases/tag/v0.1.1
+[0.1.0]: https://github.com/rooste-ssh/rooste-ssh/releases/tag/v0.1.0

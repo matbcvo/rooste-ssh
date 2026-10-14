@@ -5,7 +5,7 @@ Rooste SSH handles credentials and remote connections, so security reports are t
 ## Reporting a vulnerability
 
 Please **do not** open a public issue. Report it privately through GitHub instead:
-[Report a vulnerability](https://github.com/matbcvo/rooste-ssh/security/advisories/new)
+[Report a vulnerability](https://github.com/rooste-ssh/rooste-ssh/security/advisories/new)
 (the repository's **Security** tab → **Report a vulnerability**).
 
 Include what you found, how to reproduce it, and which version and platform you used. You will get

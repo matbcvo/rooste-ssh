@@ -5,7 +5,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 /// The latest-release endpoint of the GitHub API.
-pub const RELEASES_API: &str = "https://api.github.com/repos/matbcvo/rooste-ssh/releases/latest";
+pub const RELEASES_API: &str = "https://api.github.com/repos/rooste-ssh/rooste-ssh/releases/latest";
 
 /// A newer release than the running one.
 #[derive(Debug, Clone, PartialEq, Eq)]

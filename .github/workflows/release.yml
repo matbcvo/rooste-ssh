@@ -75,7 +75,7 @@ jobs:
           name=rooste-ssh-${{ steps.version.outputs.version }}-linux-x86_64
           mkdir -p "target/$name"
           cp target/release/rooste target/release/rooste-cli LICENSE target/notices/THIRD-PARTY-LICENSES.html \
-             packaging/linux/io.github.matbcvo.rooste-ssh.desktop packaging/icons/icon-256.png "target/$name/"
+             packaging/linux/ee.prica.rooste-ssh.desktop packaging/icons/icon-256.png "target/$name/"
           tar -C target -czf "target/packages/$name.tar.gz" "$name"
           ls -la target/packages
       - name: Smoke test the installed .deb
@@ -253,7 +253,7 @@ jobs:
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: rooste-ssh.flatpak
-          manifest-path: packaging/flatpak/io.github.matbcvo.rooste-ssh.yml
+          manifest-path: packaging/flatpak/ee.prica.rooste-ssh.yml
           cache: false
 
   publish:
