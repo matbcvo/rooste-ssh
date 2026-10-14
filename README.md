@@ -105,6 +105,19 @@ cargo run -p rooste-cli -- user@host
 See [CONTRIBUTING.md](CONTRIBUTING.md) for running the tests and the repository layout, and
 [docs/ROADMAP.md](docs/ROADMAP.md) for the design and what is planned.
 
+## Code signing policy
+
+Windows releases are to be signed with free code signing provided by
+[SignPath.io](https://signpath.io), certificate by
+[SignPath Foundation](https://signpath.org). Until that is in place, releases are unsigned; check
+downloads against `SHA256SUMS`.
+
+- Committers and reviewers: [members of the rooste-ssh organization](https://github.com/orgs/rooste-ssh/people)
+- Approvers: Martin Vooremäe ([@matbcvo](https://github.com/matbcvo))
+
+Only binaries built from this repository by its GitHub Actions release workflow are signed, and
+every release is approved by hand.
+
 ## Privacy
 
 Rooste SSH collects no data and has no telemetry. It connects only to the servers you open
