@@ -25,6 +25,7 @@ rooste-keys.workspace = true
 rooste-proto.workspace = true
 rooste-sftp.workspace = true
 rooste-term.workspace = true
+rfd.workspace = true
 serde.workspace = true
 tokio.workspace = true
 ureq.workspace = true

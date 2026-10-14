@@ -1,0 +1,190 @@
+//! "Browse…" buttons that open the system file dialog without blocking the
+//! UI: the dialog runs on the tokio runtime and its answer arrives on a
+//! later frame.
+
+use std::path::{Path, PathBuf};
+
+use tokio::sync::oneshot;
+
+/// Which field a dialog is for, so its answer lands in the right place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PickId {
+    QuickKeyFile,
+    ProfileKeyFile,
+    KeyGenSave,
+    ConvertInput,
+    ConvertOutput,
+    AgentKeyFile,
+    DownloadDir,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickKind {
+    OpenFile,
+    SaveFile,
+    Folder,
+}
+
+#[derive(Debug)]
+pub struct Picker {
+    runtime: tokio::runtime::Handle,
+    pending: Option<(PickId, oneshot::Receiver<Option<PathBuf>>)>,
+    ready: Option<(PickId, PathBuf)>,
+    /// Tests: answer every dialog with this path instead of opening one.
+    pub fake_answer: Option<PathBuf>,
+}
+
+impl Picker {
+    pub fn new(runtime: tokio::runtime::Handle) -> Self {
+        Self {
+            runtime,
+            pending: None,
+            ready: None,
+            fake_answer: None,
+        }
+    }
+
+    /// Collect a finished dialog's answer. Call once per frame.
+    pub fn poll(&mut self) {
+        if let Some((id, rx)) = &mut self.pending {
+            match rx.try_recv() {
+                Ok(answer) => {
+                    self.ready = answer.map(|path| (*id, path));
+                    self.pending = None;
+                }
+                Err(oneshot::error::TryRecvError::Empty) => {}
+                Err(oneshot::error::TryRecvError::Closed) => self.pending = None,
+            }
+        }
+    }
+
+    /// Draw a "Browse…" button. Returns the chosen path (once) after the
+    /// dialog closes. `current` is where the dialog starts.
+    pub fn button(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: PickId,
+        kind: PickKind,
+        current: &str,
+    ) -> Option<PathBuf> {
+        let busy = self.pending.is_some();
+        let clicked = ui
+            .add_enabled(!busy, egui::Button::new("Browse…"))
+            .on_hover_text(match kind {
+                PickKind::Folder => "Choose a folder",
+                _ => "Choose a file",
+            })
+            .clicked();
+        if clicked {
+            self.open(ui.ctx(), id, kind, current);
+        }
+        match self.ready.take() {
+            Some((ready, path)) if ready == id => Some(path),
+            other => {
+                self.ready = other;
+                None
+            }
+        }
+    }
+
+    fn open(&mut self, ctx: &egui::Context, id: PickId, kind: PickKind, current: &str) {
+        if let Some(path) = self.fake_answer.clone() {
+            self.ready = Some((id, path));
+            return;
+        }
+        let start = start_dir(current, id);
+        let file_name = Path::new(current.trim())
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned());
+        let (tx, rx) = oneshot::channel();
+        let ctx = ctx.clone();
+        self.runtime.spawn(async move {
+            let mut dialog = rfd::AsyncFileDialog::new();
+            if let Some(dir) = start {
+                dialog = dialog.set_directory(dir);
+            }
+            let answer = match kind {
+                PickKind::OpenFile => dialog.pick_file().await,
+                PickKind::Folder => dialog.pick_folder().await,
+                PickKind::SaveFile => {
+                    if let Some(name) = file_name {
+                        dialog = dialog.set_file_name(name);
+                    }
+                    dialog.save_file().await
+                }
+            };
+            let _ = tx.send(answer.map(|handle| handle.path().to_owned()));
+            ctx.request_repaint();
+        });
+        self.pending = Some((id, rx));
+    }
+}
+
+/// The folder of the current value if it exists, else `~/.ssh` for key
+/// files, else the home directory.
+fn start_dir(current: &str, id: PickId) -> Option<PathBuf> {
+    let current = rooste_core::expand_tilde(current.trim());
+    let dir = if current.is_dir() {
+        Some(current)
+    } else {
+        current.parent().filter(|p| p.is_dir()).map(Path::to_owned)
+    };
+    dir.or_else(|| {
+        let home = std::env::home_dir()?;
+        let ssh = home.join(".ssh");
+        Some(if id != PickId::DownloadDir && ssh.is_dir() {
+            ssh
+        } else {
+            home
+        })
+    })
+}
+
+/// A grid row: label, text field and a "Browse…" button that fills it.
+/// Returns the text field's response.
+pub fn path_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut String,
+    picker: &mut Picker,
+    id: PickId,
+    kind: PickKind,
+) -> egui::Response {
+    let label = ui.label(label);
+    let response = ui
+        .horizontal(|ui| {
+            let response = ui
+                .add(egui::TextEdit::singleline(value).desired_width(250.0))
+                .labelled_by(label.id);
+            if let Some(path) = picker.button(ui, id, kind, value) {
+                *value = path.display().to_string();
+            }
+            response
+        })
+        .inner;
+    ui.end_row();
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("id_ed25519");
+        std::fs::write(&file, "").unwrap();
+        let text = file.display().to_string();
+        assert_eq!(
+            start_dir(&text, PickId::ProfileKeyFile).unwrap(),
+            dir.path()
+        );
+        let folder = dir.path().display().to_string();
+        assert_eq!(start_dir(&folder, PickId::DownloadDir).unwrap(), dir.path());
+        assert!(
+            start_dir("", PickId::ProfileKeyFile).is_some(),
+            "falls back to a home folder"
+        );
+    }
+}
