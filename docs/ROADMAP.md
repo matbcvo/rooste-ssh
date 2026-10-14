@@ -158,7 +158,7 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
   a source-built manifest for Flathub.
 
 ### Later
-Serving Pageant's protocol from the built-in agent (Windows), folder uploads in the file panel,
+Serving Pageant's protocol from the built-in agent (Windows),
 session logging and recording, FIDO2 (`sk-ed25519`) keys, X11 forwarding, scripting or plugins,
 macOS.
 

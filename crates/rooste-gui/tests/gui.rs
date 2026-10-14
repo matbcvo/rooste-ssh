@@ -1047,6 +1047,59 @@ fn file_panel_downloads_folders_and_selections_to_a_chosen_folder() {
 }
 
 #[test]
+fn file_panel_uploads_folders() {
+    let f = Fixture::with_server();
+    let root = f.server.as_ref().unwrap().sftp_root().to_owned();
+    let project = f.dir.path().join("project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("README"), "read me").unwrap();
+    std::fs::write(project.join("src").join("main.rs"), "fn main() {}").unwrap();
+    let mut config = Config::default();
+    config.profiles = vec![Profile {
+        save_password: true,
+        ..f.profile("files")
+    }];
+    let id = config.profiles[0].id.clone();
+    let app = f.app(config);
+    app.secrets().set(&id, TEST_PASSWORD).unwrap();
+    let mut harness = harness(app);
+    context_menu(&mut harness, "files", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+    open_menu_item(&mut harness, "Tab", "Files (SFTP)");
+    wait_for(&mut harness, "listing", |app| {
+        first_tab(app)
+            .and_then(|t| t.files.as_ref())
+            .is_some_and(|f| f.handle.is_some())
+    });
+    settle(&mut harness);
+
+    // Dropping a folder uploads it with everything in it.
+    harness
+        .input_mut()
+        .dropped_files
+        .push(Arc::new(Dropped(project.clone())));
+    settle(&mut harness);
+    wait_for(&mut harness, "folder upload", |app| {
+        std::fs::read_to_string(root.join("project").join("src").join("main.rs"))
+            .is_ok_and(|t| t == "fn main() {}")
+            && files_entries(app).contains(&"project".to_owned())
+    });
+    assert_eq!(
+        std::fs::read_to_string(root.join("project").join("README")).unwrap(),
+        "read me"
+    );
+
+    // "Upload folder…" merges into the existing remote folder.
+    std::fs::write(project.join("src").join("lib.rs"), "pub fn lib() {}").unwrap();
+    files_panel(harness.state_mut()).picker.fake_answer = Some(project.clone());
+    click(&mut harness, "Upload folder…");
+    wait_for(&mut harness, "merged upload", |_| {
+        std::fs::read_to_string(root.join("project").join("src").join("lib.rs"))
+            .is_ok_and(|t| t == "pub fn lib() {}")
+    });
+}
+
+#[test]
 fn key_generator_saves_a_key_pair() {
     let f = Fixture::new();
     let mut harness = harness(f.app(Config::default()));
