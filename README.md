@@ -3,17 +3,22 @@
 A modern, memory-safe SSH client for Linux and Windows, written in Rust — with tabs, split panes,
 a session manager, built-in SFTP, key generator and agent.
 
-> **Status:** early development (milestone M0). See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** early development — milestone M1, a command-line SSH client, is done. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Building
 
-Requires Rust 1.85 or newer.
+Requires Rust 1.89 or newer.
 
 ```sh
 cargo build --release
 cargo run -p rooste-gui     # desktop app (binary: rooste)
-cargo run -p rooste-cli     # headless client
+cargo run -p rooste-cli -- user@host       # interactive shell
+cargo run -p rooste-cli -- user@host ls    # run a command
 ```
+
+`rooste-cli` tries the SSH agent, then `~/.ssh/id_ed25519`, `id_ecdsa` and `id_rsa` (or keys given
+with `-i`), then asks for a password. Unknown host keys are confirmed interactively and saved to
+`~/.ssh/known_hosts`. Run `rooste-cli --help` for all options.
 
 ## Testing
 
@@ -21,7 +26,8 @@ cargo run -p rooste-cli     # headless client
 cargo nextest run --workspace     # or: cargo test --workspace
 ```
 
-Integration tests need the OpenSSH Docker fixture:
+The SSH tests run against an in-process test server, so they work without any setup. Tests against
+a real OpenSSH server need the Docker fixture:
 
 ```sh
 docker build -t rooste-openssh crates/rooste-testkit/docker/openssh

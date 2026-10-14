@@ -1,0 +1,2 @@
+crates/rooste-testkit/keys/** text eol=lf
+crates/rooste-testkit/docker/openssh/authorized_keys text eol=lf
