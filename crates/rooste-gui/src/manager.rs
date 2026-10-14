@@ -9,6 +9,13 @@ use rooste_core::Profile;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManagerAction {
     New,
+    /// A new session in this folder (`Work/Prod`).
+    NewInFolder(String),
+    QuickConnect,
+    /// Import from PuTTY (true) or from `~/.ssh/config` (false).
+    Import {
+        putty: bool,
+    },
     Connect(String),
     Edit(String),
     Duplicate(String),
@@ -73,10 +80,12 @@ pub fn show(ui: &mut Ui, state: &mut ManagerState, profiles: &[Profile]) -> Opti
         ui.label(RichText::new("No saved sessions yet.").weak());
         ui.label(
             RichText::new(
-                "Create one with ➕, or import from PuTTY or ~/.ssh/config in the Session menu.",
+                "Create one with ➕ or by right-clicking here, or import from PuTTY or \
+                 ~/.ssh/config.",
             )
             .weak(),
         );
+        background_menu(ui, &mut action);
         return action;
     }
 
@@ -99,8 +108,38 @@ pub fn show(ui: &mut Ui, state: &mut ManagerState, profiles: &[Profile]) -> Opti
                     profile_ui(ui, profile, true, state, &mut action);
                 }
             }
+            background_menu(ui, &mut action);
         });
     action
+}
+
+/// Right-clicking the empty part of the panel.
+fn background_menu(ui: &mut Ui, action: &mut Option<ManagerAction>) {
+    let size = ui.available_size().max(egui::vec2(0.0, 40.0));
+    let response = ui.allocate_response(size, egui::Sense::click());
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Session list"));
+    response.context_menu(|ui| {
+        let mut item = |ui: &mut Ui, label: &str, chosen: ManagerAction| {
+            if ui.button(label).clicked() {
+                *action = Some(chosen);
+                ui.close();
+            }
+        };
+        item(ui, "New session…", ManagerAction::New);
+        item(ui, "Quick connect…", ManagerAction::QuickConnect);
+        ui.separator();
+        item(
+            ui,
+            "Import from ~/.ssh/config",
+            ManagerAction::Import { putty: false },
+        );
+        item(
+            ui,
+            "Import from PuTTY",
+            ManagerAction::Import { putty: true },
+        );
+    });
 }
 
 fn folder_ui(
@@ -116,10 +155,16 @@ fn folder_ui(
         } else {
             format!("{path}/{name}")
         };
-        egui::CollapsingHeader::new(format!("📁 {name}"))
+        let shown = egui::CollapsingHeader::new(format!("📁 {name}"))
             .id_salt(&child_path)
             .default_open(true)
             .show(ui, |ui| folder_ui(ui, child, &child_path, state, action));
+        shown.header_response.context_menu(|ui| {
+            if ui.button("New session in this folder…").clicked() {
+                *action = Some(ManagerAction::NewInFolder(child_path.clone()));
+                ui.close();
+            }
+        });
     }
     for profile in &folder.profiles {
         profile_ui(ui, profile, false, state, action);

@@ -328,6 +328,43 @@ fn browse_buttons_fill_key_file_fields() {
 }
 
 #[test]
+fn right_click_in_the_session_list() {
+    let f = Fixture::new();
+    let config = Config {
+        profiles: vec![Profile {
+            folder: "Work/Prod".into(),
+            ..f.profile("prod-db")
+        }],
+        ..Config::default()
+    };
+    let mut harness = harness(f.app(config));
+
+    // The empty part of the list offers a new session, quick connect and imports.
+    last(&harness, "Session list").hover();
+    settle(&mut harness);
+    last(&harness, "Session list").click_secondary();
+    settle(&mut harness);
+    harness.get_by_label("Import from ~/.ssh/config");
+    click(&mut harness, "New session…");
+    let Some(Dialog::EditProfile(editor)) = &harness.state().dialog else {
+        panic!("the session editor opens");
+    };
+    assert_eq!(editor.profile.folder, "");
+    click(&mut harness, "Cancel");
+
+    // A folder offers a new session inside it.
+    harness.get_by_label("📁 Prod").hover();
+    settle(&mut harness);
+    harness.get_by_label("📁 Prod").click_secondary();
+    settle(&mut harness);
+    click(&mut harness, "New session in this folder…");
+    let Some(Dialog::EditProfile(editor)) = &harness.state().dialog else {
+        panic!("the session editor opens");
+    };
+    assert_eq!(editor.profile.folder, "Work/Prod");
+}
+
+#[test]
 fn search_filters_the_list() {
     let f = Fixture::new();
     let config = Config {
