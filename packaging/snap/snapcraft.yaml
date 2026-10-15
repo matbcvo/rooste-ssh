@@ -1,0 +1,51 @@
+# Snap built from the release binaries (see release.yml), like the Flatpak
+# bundle. Classic confinement: an SSH client needs ~/.ssh, the user's SSH
+# agent, the keyring, serial ports and any folder for SFTP transfers, which a
+# strictly confined snap can't reach. Classic snaps need approval from the
+# Snap Store before they can be published.
+name: rooste-ssh
+title: Rooste SSH
+base: core24
+adopt-info: rooste-ssh
+license: MIT
+grade: stable
+confinement: classic
+icon: staging/icon-256.png
+website: https://github.com/rooste-ssh/rooste-ssh
+issues: https://github.com/rooste-ssh/rooste-ssh/issues
+source-code: https://github.com/rooste-ssh/rooste-ssh
+
+platforms:
+  amd64:
+
+apps:
+  rooste-ssh:
+    command: bin/rooste
+    desktop: usr/share/applications/rooste-ssh.desktop
+    common-id: ee.prica.rooste-ssh
+  cli:
+    command: bin/rooste-cli
+
+parts:
+  rooste-ssh:
+    plugin: dump
+    source: staging
+    # Summary and description come from the AppStream file.
+    parse-info: [usr/share/metainfo/ee.prica.rooste-ssh.metainfo.xml]
+    override-build: |
+      install -Dm755 rooste "$CRAFT_PART_INSTALL/bin/rooste"
+      install -Dm755 rooste-cli "$CRAFT_PART_INSTALL/bin/rooste-cli"
+      install -Dm644 ee.prica.rooste-ssh.metainfo.xml \
+        "$CRAFT_PART_INSTALL/usr/share/metainfo/ee.prica.rooste-ssh.metainfo.xml"
+      install -Dm644 THIRD-PARTY-LICENSES.html \
+        "$CRAFT_PART_INSTALL/usr/share/doc/rooste-ssh/THIRD-PARTY-LICENSES.html"
+      mkdir -p "$CRAFT_PART_INSTALL/usr/share/applications"
+      sed -e 's|^Exec=.*|Exec=rooste-ssh|' -e 's|^Icon=.*|Icon=${SNAP}/meta/gui/icon.png|' \
+        ee.prica.rooste-ssh.desktop > "$CRAFT_PART_INSTALL/usr/share/applications/rooste-ssh.desktop"
+      craftctl set version="$(cat VERSION)"
+
+lint:
+  ignore:
+    # The binaries use the host's system libraries, as the .deb does.
+    - classic
+    - library
