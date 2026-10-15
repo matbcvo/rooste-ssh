@@ -385,6 +385,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
-      - run: cargo publish --workspace
+      # One crate at a time, skipping versions already on crates.io and
+      # waiting out rate limits, so this job can simply be re-run.
+      - run: python3 .github/scripts/publish_crates.py
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
