@@ -32,8 +32,17 @@ allow = [
     "Ubuntu-font-1.0",
     # Mozilla root certificate data (via rustls-platform-verifier).
     "CDLA-Permissive-2.0",
+    # Public-domain dedication (tiny-keccak, used at build time by ahash).
+    "CC0-1.0",
 ]
 confidence-threshold = 0.9
+exceptions = [
+    # Rhai's string type, required by Rhai and used unmodified. MPL-2.0 is
+    # file-level copyleft: it covers only smartstring's own files, its source
+    # is on crates.io and its license text ships in the release notices.
+    # Anything else under MPL is still rejected.
+    { allow = ["MPL-2.0"], crate = "smartstring" },
+]
 
 [bans]
 multiple-versions = "warn"

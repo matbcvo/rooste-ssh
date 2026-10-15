@@ -157,6 +157,7 @@ impl ProfileEditor {
         ctx: &egui::Context,
         folders: &[String],
         ports: &[String],
+        scripts: &[String],
         picker: &mut Picker,
     ) -> Decision<(Profile, String)> {
         let mut decision = Decision::Pending;
@@ -280,6 +281,31 @@ impl ProfileEditor {
                                             );
                                     });
                                 }
+                                labeled(ui, "Run on connect", |ui| {
+                                    let shown = if p.on_connect_script.is_empty() {
+                                        "Nothing".to_owned()
+                                    } else {
+                                        p.on_connect_script.clone()
+                                    };
+                                    egui::ComboBox::from_id_salt("on-connect-script")
+                                        .selected_text(shown)
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                &mut p.on_connect_script,
+                                                String::new(),
+                                                "Nothing",
+                                            );
+                                            for name in scripts {
+                                                ui.selectable_value(
+                                                    &mut p.on_connect_script,
+                                                    name.clone(),
+                                                    name,
+                                                );
+                                            }
+                                        })
+                                        .response
+                                        .on_hover_text("A script from the scripts folder to run each time this session connects")
+                                });
                                 text(ui, "Tags", &mut self.tags);
                                 labeled(ui, "Notes", |ui| {
                                     ui.add(
@@ -564,6 +590,11 @@ pub fn prompt(
                     };
                     (heading, prompt.trim_end_matches(':').to_owned(), !echo)
                 }
+                PromptKind::Script {
+                    script,
+                    question,
+                    hidden,
+                } => (format!("Script {script}"), question.clone(), *hidden),
             };
             ui.heading(heading);
             if let PromptKind::Interactive { instructions, .. } = kind
@@ -590,7 +621,11 @@ pub fn prompt(
                 response.request_focus();
             }
             let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let (ok, cancel) = buttons(ui, "Log in");
+            let accept = match kind {
+                PromptKind::Script { .. } => "OK",
+                _ => "Log in",
+            };
+            let (ok, cancel) = buttons(ui, accept);
             if ok || enter {
                 decision = Decision::Accept(std::mem::take(input));
             } else if cancel {

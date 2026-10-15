@@ -125,9 +125,27 @@ pub enum PromptKind {
         /// Whether the answer may be shown as typed.
         echo: bool,
     },
+    /// A question from a running script.
+    Script {
+        script: String,
+        question: String,
+        /// Hide the answer as it is typed (passwords).
+        hidden: bool,
+    },
 }
 
 const PROMPT_ATTEMPTS: usize = 3;
+
+impl PromptKind {
+    /// A question from a script.
+    pub fn script(script: &str, question: &str, hidden: bool) -> Self {
+        PromptKind::Script {
+            script: script.to_owned(),
+            question: question.to_owned(),
+            hidden,
+        }
+    }
+}
 
 /// From the session to the UI.
 #[derive(Debug)]

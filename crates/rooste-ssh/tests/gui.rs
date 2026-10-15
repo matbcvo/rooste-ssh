@@ -919,6 +919,61 @@ fn sessions_can_be_recorded_for_playback() {
 }
 
 #[test]
+fn scripts_drive_the_session() {
+    let f = Fixture::with_server();
+    let scripts = f.dir.path().join("scripts");
+    std::fs::create_dir_all(&scripts).unwrap();
+    std::fs::write(
+        scripts.join("greet.rhai"),
+        r#"
+        send_line("scripted");
+        if wait_for("echo: scripted", 5) {
+            let name = ask("Your name?");
+            send_line(`hi ${name}`);
+        }
+        "#,
+    )
+    .unwrap();
+    std::fs::write(scripts.join("hello.rhai"), r#"send_line(`auto ${USER}`);"#).unwrap();
+    let profile = Profile {
+        on_connect_script: "hello.rhai".into(),
+        ..f.profile("one")
+    };
+    let mut harness = harness(app_with(&f, vec![profile]));
+
+    // "Run on connect" runs as soon as the session is up.
+    context_menu(&mut harness, "one", "Connect");
+    wait_for(&mut harness, "on-connect script", |app| {
+        screen_text(app).contains(&format!("echo: auto {TEST_USER}"))
+    });
+
+    // A script from the command palette sends, waits and asks.
+    harness.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::P,
+    );
+    settle(&mut harness);
+    last(&harness, "Command").type_text("greet");
+    settle(&mut harness);
+    click(&mut harness, "Run script: greet.rhai");
+    wait_for(&mut harness, "question", |app| {
+        first_tab(app).is_some_and(|t| t.prompt.is_some())
+    });
+    harness.get_by_label("Script greet.rhai");
+    type_into(&mut harness, "Your name?", "Martin");
+    click(&mut harness, "OK");
+    wait_for(&mut harness, "answer sent", |app| {
+        screen_text(app).contains("echo: hi Martin")
+    });
+    wait_for(&mut harness, "finished", |app| {
+        app.notice
+            .as_ref()
+            .is_some_and(|n| n.text == "Script greet.rhai finished.")
+    });
+    assert!(first_tab(harness.state()).unwrap().script.is_none());
+}
+
+#[test]
 fn split_right_opens_a_second_session_beside_the_first() {
     let f = Fixture::with_server();
     let mut harness = harness(app_with(&f, vec![f.profile("one")]));

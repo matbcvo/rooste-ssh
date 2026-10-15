@@ -13,8 +13,13 @@ accepted = [
     "Ubuntu-font-1.0",
     # Mozilla root certificate data (via rustls-platform-verifier).
     "CDLA-Permissive-2.0",
+    "CC0-1.0",
 ]
 targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
 workarounds = ["ring", "rustls"]
+
+# Rhai's string type (see the exception in deny.toml).
+[smartstring]
+accepted = ["MPL-2.0"]

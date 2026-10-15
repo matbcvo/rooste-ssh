@@ -1,5 +1,6 @@
 //! One terminal tab: a session, its terminal and pending prompts.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use egui::{RichText, Ui};
@@ -9,6 +10,7 @@ use rooste_terminal::{Palette, PlainText, SearchDirection, TermEvent, Terminal};
 use tokio::sync::oneshot;
 
 use crate::files::FilesPanel;
+use crate::scripting::ScriptEvent;
 use crate::session::{
     ConnectRequest, Failure, PromptKind, Session, SessionCommand, SessionEvent, TunnelStatus,
 };
@@ -53,6 +55,16 @@ pub enum TabAction {
     EnableLegacy { profile_id: Option<String> },
     /// The user chose this folder with "Download to…".
     RememberDownloadFolder(std::path::PathBuf),
+    /// Show a message in the status bar (from a script).
+    Notify { text: String, error: bool },
+}
+
+/// A script running in a tab.
+#[derive(Debug)]
+pub struct RunningScript {
+    pub handle: crate::scripting::ScriptHandle,
+    /// Turns session output into the plain text scripts match against.
+    text: PlainText,
 }
 
 /// A file receiving a tab's output as plain text.
@@ -155,6 +167,10 @@ pub struct SessionTab {
     pub find: Option<FindBar>,
     /// The session log, while the tab's output is being saved.
     pub log: Option<SessionLog>,
+    /// The running script, if any.
+    pub script: Option<RunningScript>,
+    /// A script to run each time the session connects.
+    pub on_connect_script: Option<std::path::PathBuf>,
     /// The asciinema recording, while the tab is being recorded.
     pub recording: Option<crate::recording::SessionRecording>,
     /// The SFTP side panel, when shown.
@@ -212,6 +228,8 @@ impl SessionTab {
             find: None,
             log: None,
             recording: None,
+            script: None,
+            on_connect_script: None,
             files: None,
             download_dir: crate::theme::download_dir(settings),
             recent_download_dir: crate::theme::recent_download_dir(settings),
@@ -466,6 +484,87 @@ impl SessionTab {
         }
     }
 
+    /// Run the script at `path` in this tab, replacing a running one.
+    pub fn run_script(&mut self, path: &std::path::Path) {
+        let info = crate::scripting::SessionInfo {
+            name: self.name.clone(),
+            host: self.request.host.clone(),
+            user: self.request.user.clone(),
+        };
+        let ctx = self.ctx.clone();
+        let handle = crate::scripting::start(path, info, Arc::new(move || ctx.request_repaint()));
+        self.script = Some(RunningScript {
+            handle,
+            text: PlainText::new(),
+        });
+    }
+
+    pub fn stop_script(&mut self) {
+        if let Some(script) = &self.script {
+            script.handle.cancel();
+        }
+    }
+
+    /// Act on what the running script asked for.
+    fn poll_script(&mut self) {
+        let Some(script) = &self.script else { return };
+        let name = script.handle.name.clone();
+        for event in script.handle.events() {
+            match event {
+                ScriptEvent::Send(bytes) => {
+                    if self.state == TabState::Connected {
+                        self.terminal.scroll_to_bottom();
+                        self.session.send(SessionCommand::Input(bytes));
+                    }
+                }
+                ScriptEvent::Notify(text) => {
+                    self.actions.push(TabAction::Notify { text, error: false });
+                }
+                ScriptEvent::Ask {
+                    question,
+                    hidden,
+                    reply,
+                } => {
+                    self.prompt = Some(PendingPrompt {
+                        kind: PromptKind::script(&name, &question, hidden),
+                        retry: false,
+                        input: String::new(),
+                        reply,
+                    });
+                }
+                ScriptEvent::Finished(result) => {
+                    self.script = None;
+                    let (text, error) = match result {
+                        Ok(()) => (format!("Script {name} finished."), false),
+                        Err(e) if e == "cancelled" => (format!("Script {name} stopped."), false),
+                        Err(e) => (format!("Script {name} failed: {e}"), true),
+                    };
+                    self.actions.push(TabAction::Notify { text, error });
+                    return;
+                }
+            }
+        }
+    }
+
+    /// A slim bar while a script runs, with a button to stop it.
+    fn script_ui(&mut self, ui: &mut Ui) {
+        let Some(script) = &self.script else { return };
+        let name = script.handle.name.clone();
+        let mut stop = false;
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(8, 4))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(format!("Running script {name}"));
+                    stop = ui.button("Stop").clicked();
+                });
+            });
+        if stop {
+            self.stop_script();
+        }
+    }
+
     /// Record the tab's output from now on to `path` (asciicast; replaces
     /// the file).
     pub fn start_recording(&mut self, path: &std::path::Path) {
@@ -515,6 +614,7 @@ impl SessionTab {
 
     /// Handle session and terminal events, and due reconnects.
     pub fn poll(&mut self, ctx: &egui::Context) {
+        self.poll_script();
         for event in self.session.poll() {
             match event {
                 SessionEvent::Status(text) => self.state = TabState::Connecting(text),
@@ -543,6 +643,9 @@ impl SessionTab {
                     }
                     self.reconnects = 0;
                     self.state = TabState::Connected;
+                    if let Some(path) = self.on_connect_script.clone() {
+                        self.run_script(&path);
+                    }
                     if self.files.is_some() {
                         self.session.send(SessionCommand::OpenFiles);
                     }
@@ -560,6 +663,10 @@ impl SessionTab {
                 SessionEvent::Tunnels(statuses) => self.tunnels = statuses,
                 SessionEvent::Output(bytes) => {
                     self.terminal.advance(&bytes);
+                    if let Some(script) = &mut self.script {
+                        let text = script.text.convert(&bytes);
+                        script.handle.output(&text);
+                    }
                     if let Some(log) = &mut self.log
                         && let Err(e) = log.write(&bytes)
                     {
@@ -701,6 +808,7 @@ impl SessionTab {
                 }
             });
         }
+        self.script_ui(ui);
         self.find_ui(ui);
         let panel_id = egui::Id::new(("files", self.id));
         if let Some(files) = &mut self.files {

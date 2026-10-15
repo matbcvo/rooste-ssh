@@ -21,6 +21,9 @@ session manager, an SFTP file panel, port forwarding, and built-in key tools and
   folders, drop files onto it to upload, or choose a folder with "Download to…".
 - **Terminal:** true color, Unicode, mouse support, search through the scrollback, per-tab zoom,
   logging sessions to text files and recording them for playback (asciinema `.cast`).
+- **Scripts:** automate logins and command sequences with small [Rhai](https://rhai.rs) scripts
+  that send text, wait for output and ask you questions; run them from a tab or on connect. See
+  [docs/scripting.md](docs/scripting.md).
 - **Tools:** generate keys, convert between `.ppk` and OpenSSH keys, and keep keys in a built-in
   SSH agent that other programs can use.
 - **Also:** telnet, raw TCP and serial connections; light and dark themes; a portable mode; an
