@@ -96,6 +96,12 @@ impl SessionLog {
 /// A file name for a new log of session `name`, such as
 /// `web-1 2026-10-14 15-30-00.log`.
 pub fn log_file_name(name: &str) -> String {
+    session_file_name(name, "log")
+}
+
+/// `<session> <date time>.<extension>`, with characters that are awkward in
+/// file names replaced.
+pub fn session_file_name(name: &str, extension: &str) -> String {
     let safe: String = name
         .chars()
         .map(|c| {
@@ -107,7 +113,7 @@ pub fn log_file_name(name: &str) -> String {
         })
         .collect();
     let now = chrono::Local::now().format("%Y-%m-%d %H-%M-%S");
-    format!("{} {now}.log", safe.trim())
+    format!("{} {now}.{extension}", safe.trim())
 }
 
 /// The find bar's state.
@@ -149,6 +155,8 @@ pub struct SessionTab {
     pub find: Option<FindBar>,
     /// The session log, while the tab's output is being saved.
     pub log: Option<SessionLog>,
+    /// The asciinema recording, while the tab is being recorded.
+    pub recording: Option<crate::recording::SessionRecording>,
     /// The SFTP side panel, when shown.
     pub files: Option<FilesPanel>,
     download_dir: std::path::PathBuf,
@@ -203,6 +211,7 @@ impl SessionTab {
             prompt: None,
             find: None,
             log: None,
+            recording: None,
             files: None,
             download_dir: crate::theme::download_dir(settings),
             recent_download_dir: crate::theme::recent_download_dir(settings),
@@ -387,7 +396,11 @@ impl SessionTab {
         };
         let broadcast = if self.broadcast { "📢 " } else { "" };
         let logging = if self.log.is_some() { "⏺ " } else { "" };
-        format!("{marker}{legacy}{broadcast}{logging}{}", self.name)
+        let recording = if self.recording.is_some() { "◉ " } else { "" };
+        format!(
+            "{marker}{legacy}{broadcast}{logging}{recording}{}",
+            self.name
+        )
     }
 
     /// The session failed or closed.
@@ -451,6 +464,20 @@ impl SessionTab {
             Ok(log) => self.log = Some(log),
             Err(e) => self.note(&format!("Could not log to {}: {e}", path.display())),
         }
+    }
+
+    /// Record the tab's output from now on to `path` (asciicast; replaces
+    /// the file).
+    pub fn start_recording(&mut self, path: &std::path::Path) {
+        let (cols, rows) = self.terminal.size();
+        match crate::recording::SessionRecording::create(path, &self.name, cols, rows) {
+            Ok(recording) => self.recording = Some(recording),
+            Err(e) => self.note(&format!("Could not record to {}: {e}", path.display())),
+        }
+    }
+
+    pub fn stop_recording(&mut self) {
+        self.recording = None;
     }
 
     pub fn stop_log(&mut self) {
@@ -539,6 +566,13 @@ impl SessionTab {
                         let path = log.path.display().to_string();
                         self.log = None;
                         self.note(&format!("Stopped logging to {path}: {e}"));
+                    }
+                    if let Some(recording) = &mut self.recording
+                        && let Err(e) = recording.output(&bytes)
+                    {
+                        let path = recording.path.display().to_string();
+                        self.recording = None;
+                        self.note(&format!("Stopped recording to {path}: {e}"));
                     }
                 }
                 SessionEvent::Closed { exit_status } => {
@@ -688,6 +722,11 @@ impl SessionTab {
             if size != self.remote_size {
                 self.session.send(SessionCommand::Resize(size.0, size.1));
                 self.remote_size = size;
+                if let Some(recording) = &mut self.recording
+                    && recording.resize(size.0, size.1).is_err()
+                {
+                    self.recording = None;
+                }
             }
             if !out.send.is_empty() {
                 if self.broadcast {

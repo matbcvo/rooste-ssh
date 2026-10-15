@@ -17,6 +17,7 @@ name = "rooste"
 path = "src/main.rs"
 
 [dependencies]
+serde_json.workspace = true
 chrono.workspace = true
 arboard.workspace = true
 eframe.workspace = true

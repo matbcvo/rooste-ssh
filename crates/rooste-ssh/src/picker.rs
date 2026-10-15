@@ -25,6 +25,8 @@ pub enum PickId {
     LogDir,
     /// "Start logging…" for a tab.
     SessionLog,
+    /// "Record session…" for a tab.
+    SessionRecording,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

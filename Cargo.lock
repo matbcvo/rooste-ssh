@@ -4538,6 +4538,7 @@ dependencies = [
  "rooste-testkit",
  "russh",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "ureq",
