@@ -134,6 +134,7 @@ enum TabMenuAction {
     SplitDown,
     Files,
     Log,
+    Record,
     Reconnect,
     Close,
 }
@@ -192,6 +193,7 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
         };
         let ended = tab.has_ended();
         let logging = tab.log.is_some();
+        let recording = tab.recording.is_some();
         response.context_menu(|ui| {
             let mut item = |ui: &mut Ui, label: &str, action: TabMenuAction| {
                 if ui.button(label).clicked() {
@@ -209,6 +211,12 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
                 "Start logging…"
             };
             item(ui, log_label, TabMenuAction::Log);
+            let record_label = if recording {
+                "Stop recording"
+            } else {
+                "Record session…"
+            };
+            item(ui, record_label, TabMenuAction::Record);
             if ended {
                 item(ui, "Reconnect", TabMenuAction::Reconnect);
             }
@@ -261,6 +269,8 @@ pub struct RoosteApp {
     pub picker: Picker,
     /// The tab waiting for the "Start logging…" dialog.
     log_target: Option<TileId>,
+    /// The tab waiting for the "Record session…" dialog.
+    recording_target: Option<TileId>,
     known_hosts: Option<PathBuf>,
     imports: ImportSources,
     window_title: String,
@@ -338,6 +348,7 @@ impl RoosteApp {
             serial_ports: Vec::new(),
             picker,
             log_target: None,
+            recording_target: None,
             known_hosts: None,
             imports: ImportSources::default(),
             window_title: String::new(),
@@ -802,6 +813,7 @@ impl RoosteApp {
                 }
             }
             TabMenuAction::Log => self.toggle_log(id),
+            TabMenuAction::Record => self.toggle_recording(id),
             TabMenuAction::Reconnect => {
                 if let Some(tab) = self.tab_mut(id) {
                     tab.reconnect();
@@ -830,6 +842,30 @@ impl RoosteApp {
         self.picker.open(
             &ctx,
             PickId::SessionLog,
+            PickKind::SaveFile,
+            &suggested.display().to_string(),
+        );
+    }
+
+    /// Stop the tab's recording, or ask where to start one.
+    fn toggle_recording(&mut self, id: TileId) {
+        let log_dir = self.config.settings.log_dir.trim();
+        let dir = if log_dir.is_empty() {
+            theme::download_dir(&self.config.settings)
+        } else {
+            rooste_core::expand_tilde(log_dir)
+        };
+        let Some(tab) = self.tab_mut(id) else { return };
+        if tab.recording.is_some() {
+            tab.stop_recording();
+            return;
+        }
+        let suggested = dir.join(crate::recording::recording_file_name(&tab.name));
+        let ctx = tab.ctx.clone();
+        self.recording_target = Some(id);
+        self.picker.open(
+            &ctx,
+            PickId::SessionRecording,
             PickKind::SaveFile,
             &suggested.display().to_string(),
         );
@@ -878,6 +914,11 @@ impl RoosteApp {
             Command::ToggleLog => {
                 if let Some(id) = self.active_tab_id() {
                     self.toggle_log(id);
+                }
+            }
+            Command::ToggleRecording => {
+                if let Some(id) = self.active_tab_id() {
+                    self.toggle_recording(id);
                 }
             }
             Command::Find => {
@@ -999,6 +1040,12 @@ impl RoosteApp {
             && let Some(tab) = self.tab_mut(id)
         {
             tab.start_log(&path);
+        }
+        if let Some(path) = self.picker.take(PickId::SessionRecording)
+            && let Some(id) = self.recording_target.take()
+            && let Some(tab) = self.tab_mut(id)
+        {
+            tab.start_recording(&path);
         }
         // Before the terminal reads keys, so these keys don't reach the shell.
         self.terminal_shortcuts(&ctx);
@@ -1177,6 +1224,22 @@ impl RoosteApp {
                         .clicked()
                     {
                         self.run_command(&ctx, Command::ToggleLog);
+                        ui.close();
+                    }
+                    let recording = self
+                        .active_tab_id()
+                        .and_then(|id| self.tree.tiles.get_pane(&id))
+                        .is_some_and(|tab| tab.recording.is_some());
+                    let record_label = if recording {
+                        "Stop recording"
+                    } else {
+                        "Record session…"
+                    };
+                    if ui
+                        .add_enabled(has_tab, egui::Button::new(record_label))
+                        .clicked()
+                    {
+                        self.run_command(&ctx, Command::ToggleRecording);
                         ui.close();
                     }
                     for (label, command) in [

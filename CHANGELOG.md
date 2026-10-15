@@ -4,6 +4,14 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Session recordings: "Record session…" (Tab menu, the tab's right-click menu, the command palette)
+  saves an asciinema `.cast` file that replays the session with its timing. Only output is
+  recorded, never what you type.
+
 ## [0.2.1] - 2026-10-15
 
 ### Added

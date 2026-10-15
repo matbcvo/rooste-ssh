@@ -19,8 +19,8 @@ session manager, an SFTP file panel, port forwarding, and built-in key tools and
   hosts (`ProxyJump`), and agent and X11 forwarding.
 - **Files:** an SFTP panel next to the terminal. Browse, download or upload files and whole
   folders, drop files onto it to upload, or choose a folder with "Download to…".
-- **Terminal:** true color, Unicode, mouse support, search through the scrollback, per-tab zoom
-  and logging sessions to text files.
+- **Terminal:** true color, Unicode, mouse support, search through the scrollback, per-tab zoom,
+  logging sessions to text files and recording them for playback (asciinema `.cast`).
 - **Tools:** generate keys, convert between `.ppk` and OpenSSH keys, and keep keys in a built-in
   SSH agent that other programs can use.
 - **Also:** telnet, raw TCP and serial connections; light and dark themes; a portable mode; an

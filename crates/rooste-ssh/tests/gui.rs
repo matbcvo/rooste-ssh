@@ -885,6 +885,40 @@ fn sessions_are_logged_as_plain_text() {
 }
 
 #[test]
+fn sessions_can_be_recorded_for_playback() {
+    let f = Fixture::with_server();
+    let mut harness = harness(app_with(&f, vec![f.profile("one")]));
+    context_menu(&mut harness, "one", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+    wait_for(&mut harness, "prompt", |app| screen_text(app).contains('$'));
+
+    let cast = f.dir.path().join("one.cast");
+    harness.state_mut().picker.fake_answer = Some(cast.clone());
+    open_menu_item(&mut harness, "Tab", "Record session…");
+    settle(&mut harness);
+    assert!(first_tab(harness.state()).unwrap().title().contains('◉'));
+    harness.event(egui::Event::Text("on tape".into()));
+    harness.key_press(egui::Key::Enter);
+    let read = || std::fs::read_to_string(&cast).unwrap_or_default();
+    wait_for(&mut harness, "recorded", |_| {
+        read().contains("echo: on tape")
+    });
+
+    let text = read();
+    let mut lines = text.lines();
+    let header: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+    assert_eq!(header["version"], 2);
+    assert_eq!(header["title"], "one");
+    let events: Vec<serde_json::Value> = lines.map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert!(events.iter().all(|e| e[1] == "o" || e[1] == "r"));
+    // What the user typed is not recorded as input; only the echo is output.
+    assert!(!events.iter().any(|e| e[1] == "i"));
+
+    open_menu_item(&mut harness, "Tab", "Stop recording");
+    assert!(first_tab(harness.state()).unwrap().recording.is_none());
+}
+
+#[test]
 fn split_right_opens_a_second_session_beside_the_first() {
     let f = Fixture::with_server();
     let mut harness = harness(app_with(&f, vec![f.profile("one")]));

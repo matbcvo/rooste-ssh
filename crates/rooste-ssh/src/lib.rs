@@ -9,6 +9,7 @@ pub mod keys;
 pub mod manager;
 pub mod palette;
 pub mod picker;
+pub mod recording;
 pub mod secrets;
 pub mod session;
 pub mod tab;

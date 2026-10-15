@@ -25,6 +25,7 @@ pub enum Command {
     ResetZoom,
     Find,
     ToggleLog,
+    ToggleRecording,
     CloseTab,
 }
 
@@ -59,6 +60,10 @@ pub fn commands(profiles: &[Profile], has_tab: bool) -> Vec<(String, Command)> {
             ("Find in terminal…".to_owned(), Command::Find),
             ("Files (SFTP)".to_owned(), Command::ToggleFiles),
             ("Start or stop logging".to_owned(), Command::ToggleLog),
+            (
+                "Start or stop recording".to_owned(),
+                Command::ToggleRecording,
+            ),
             ("Duplicate tab".to_owned(), Command::DuplicateTab),
             ("Split right".to_owned(), Command::SplitRight),
             ("Split down".to_owned(), Command::SplitDown),
