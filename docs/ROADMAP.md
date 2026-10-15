@@ -30,7 +30,7 @@ protocol to other programs is planned for later.)
 | App type | GUI desktop app (egui). `rooste-cli` doubles as a test client and later a scriptable command-line client |
 | Protocols | SSH first. Serial, telnet and raw TCP in M5b, behind the `Transport` trait that exists from day one. rlogin is not planned |
 | Legacy algorithms | Modern defaults; a small legacy set can be enabled **per session only** (see [Security](#security)) |
-| Platforms | Linux and Windows. macOS may come for free later |
+| Platforms | Linux and Windows; macOS builds since 0.2.0 (experimental, not notarized) |
 | License | MIT |
 | MSRV | Rust 1.95 (edition 2024; required by eframe) |
 
@@ -147,20 +147,42 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
 - Windows: MSI (`cargo-wix`), winget, portable zip, code signing.
 - Linux: `.deb`, `.rpm`, AppImage, Flatpak.
 - `release.yml` with smoke tests of the packaged binaries; update check.
-- Done: `cargo packager` builds the MSI, `.deb` and AppImage; `cargo generate-rpm` the RPM; a
+- Done: `cargo packager` builds the MSI, `.deb`, AppImage and macOS app; `cargo generate-rpm` the RPM; a
   portable zip and a Flatpak bundle from the release binaries; third-party license notices via
   `cargo-about`. The release workflow installs the MSI and `.deb` and logs in to an SSH server with
   the installed `rooste-cli` before anything is published, then attaches every file with
-  `SHA256SUMS`. Code signing runs when a certificate is configured (`WINDOWS_CERTIFICATE` and
-  `WINDOWS_CERTIFICATE_PASSWORD` secrets). winget manifests are generated for submission. The app
-  can check GitHub for newer releases at startup (Settings).
-- Needs the maintainer's accounts: a code-signing certificate, the winget-pkgs pull request, and
-  a source-built manifest for Flathub.
+  `SHA256SUMS`, and publishes the crates to crates.io. winget manifests are generated for
+  submission. The app checks GitHub for newer releases at startup (optional, in Settings).
+- Code signing: the plan is free signing for open-source projects from the SignPath Foundation
+  (the README has the code signing policy they require); the workflow's `.pfx` step is a fallback
+  for a purchased certificate. Still to do by the maintainer: the SignPath application, the
+  winget-pkgs pull request, and a source-built manifest for Flathub.
 
-### Later
-Serving Pageant's protocol from the built-in agent (Windows),
-session recordings for playback (plain-text logs are done), FIDO2 (`sk-ed25519`) keys, scripting or plugins,
-macOS.
+### After 0.1
+
+Added after the first release:
+
+- Keyboard-interactive login, including one-time codes (0.2.x).
+- X11 forwarding, with the server only seeing a fake cookie.
+- Find in the scrollback (Ctrl+Shift+F), per-tab zoom, right-click menus on tabs and in the session
+  list, a new-version banner.
+- SFTP: whole folders up and down, multi-select, "Download to…".
+- Session logs (plain text) and recordings for playback (asciinema `.cast`).
+- Scripting in Rhai: send, wait for output, ask; run from a tab, the palette or on connect
+  ([docs/scripting.md](scripting.md)).
+- Experimental macOS builds (`.dmg` for Apple Silicon and Intel).
+- Publishing to crates.io (`cargo install rooste-ssh`), with trusted publishing from the release
+  workflow.
+
+### Not planned for now
+
+- **Serving Pageant's protocol from the built-in agent (Windows).** It needs Windows window
+  messages and shared memory, which can't be done without `unsafe` code (forbidden in this
+  workspace). Rooste can already *use* keys held by Pageant.
+- **FIDO2 / security keys (`sk-ed25519`).** Needs talking to hardware keys over USB HID and a
+  device to test with; keys held by an OpenSSH agent may already work through agent login.
+- **Plugins beyond scripts.** Rhai scripts cover automation; loadable plugins (native or
+  WebAssembly) would only make sense for features scripts can't reach, if users ask for them.
 
 ## Testing strategy
 

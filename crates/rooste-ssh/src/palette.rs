@@ -27,10 +27,12 @@ pub enum Command {
     ToggleLog,
     ToggleRecording,
     CloseTab,
+    RunScript(String),
+    OpenScriptsFolder,
 }
 
 /// Available commands with their labels.
-pub fn commands(profiles: &[Profile], has_tab: bool) -> Vec<(String, Command)> {
+pub fn commands(profiles: &[Profile], has_tab: bool, scripts: &[String]) -> Vec<(String, Command)> {
     let mut list: Vec<(String, Command)> = profiles
         .iter()
         .map(|p| {
@@ -77,6 +79,15 @@ pub fn commands(profiles: &[Profile], has_tab: bool) -> Vec<(String, Command)> {
             ("Close tab".to_owned(), Command::CloseTab),
         ]);
     }
+    if has_tab {
+        list.extend(scripts.iter().map(|name| {
+            (
+                format!("Run script: {name}"),
+                Command::RunScript(name.clone()),
+            )
+        }));
+    }
+    list.push(("Open scripts folder".to_owned(), Command::OpenScriptsFolder));
     list
 }
 
@@ -151,13 +162,21 @@ mod tests {
             host: "h".into(),
             ..Profile::default()
         }];
-        let without_tab = commands(&profiles, false);
+        let without_tab = commands(&profiles, false, &[]);
         assert!(without_tab.iter().all(|(_, c)| *c != Command::SplitRight));
-        let all = commands(&profiles, true);
+        let all = commands(&profiles, true, &["backup.rhai".to_owned()]);
         let hits = filter(&all, "conn web");
         assert_eq!(hits.len(), 1);
         assert!(matches!(hits[0].1, Command::Connect(_)));
         assert_eq!(filter(&all, "split").len(), 2);
+        assert!(
+            matches!(&filter(&all, "backup")[0].1, Command::RunScript(n) if n == "backup.rhai")
+        );
+        assert!(
+            without_tab
+                .iter()
+                .all(|(_, c)| !matches!(c, Command::RunScript(_)))
+        );
         assert_eq!(filter(&all, "").len(), all.len());
         assert!(filter(&all, "zzz").is_empty());
     }

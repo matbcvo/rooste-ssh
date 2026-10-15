@@ -34,6 +34,9 @@ pub struct Profile {
     pub forward_agent: bool,
     /// Show the server's graphical (X11) programs on the local display.
     pub forward_x11: bool,
+    /// A script (file name in the scripts folder) to run once connected;
+    /// empty for none.
+    pub on_connect_script: String,
     /// Port forwards started with the session.
     pub tunnels: Vec<Tunnel>,
     /// Line settings for serial profiles (the port name is in `host`).
@@ -207,6 +210,7 @@ impl Default for Profile {
             proxy_jump: None,
             forward_agent: false,
             forward_x11: false,
+            on_connect_script: String::new(),
             tunnels: Vec::new(),
             serial: SerialSettings::default(),
             notes: String::new(),

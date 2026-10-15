@@ -8,6 +8,9 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- Scripting: Rhai scripts in the scripts folder can send text, wait for output, ask questions and
+  show messages. Run them from a tab's right-click menu or the command palette, or automatically
+  when a session connects ("Run on connect"). See `docs/scripting.md`.
 - Session recordings: "Record session…" (Tab menu, the tab's right-click menu, the command palette)
   saves an asciinema `.cast` file that replays the session with its timing. Only output is
   recorded, never what you type.

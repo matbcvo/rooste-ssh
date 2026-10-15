@@ -125,9 +125,11 @@ struct TabBehavior {
     close_requests: Vec<TileId>,
     /// Picked from a tab's right-click menu.
     menu_actions: Vec<(TileId, TabMenuAction)>,
+    /// Where scripts are kept, for the "Run script" menu.
+    scripts_dir: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum TabMenuAction {
     Duplicate,
     SplitRight,
@@ -135,6 +137,9 @@ enum TabMenuAction {
     Files,
     Log,
     Record,
+    RunScript(String),
+    StopScript,
+    OpenScriptsFolder,
     Reconnect,
     Close,
 }
@@ -194,6 +199,8 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
         let ended = tab.has_ended();
         let logging = tab.log.is_some();
         let recording = tab.recording.is_some();
+        let running_script = tab.script.is_some();
+        let scripts_dir = self.scripts_dir.clone();
         response.context_menu(|ui| {
             let mut item = |ui: &mut Ui, label: &str, action: TabMenuAction| {
                 if ui.button(label).clicked() {
@@ -217,6 +224,24 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
                 "Record session…"
             };
             item(ui, record_label, TabMenuAction::Record);
+            if running_script {
+                item(ui, "Stop script", TabMenuAction::StopScript);
+            } else {
+                ui.menu_button("Run script", |ui| {
+                    let scripts = scripts_dir
+                        .as_deref()
+                        .map(crate::scripting::list_scripts)
+                        .unwrap_or_default();
+                    if scripts.is_empty() {
+                        ui.weak("No scripts yet");
+                    }
+                    for name in scripts {
+                        item(ui, &name, TabMenuAction::RunScript(name.clone()));
+                    }
+                    ui.separator();
+                    item(ui, "Open scripts folder", TabMenuAction::OpenScriptsFolder);
+                });
+            }
             if ended {
                 item(ui, "Reconnect", TabMenuAction::Reconnect);
             }
@@ -606,6 +631,11 @@ impl RoosteApp {
         );
         tab.profile_id = Some(profile.id.clone());
         tab.save_password = profile.save_password;
+        if !profile.on_connect_script.is_empty()
+            && let Some(dir) = self.scripts_dir()
+        {
+            tab.on_connect_script = Some(dir.join(&profile.on_connect_script));
+        }
         self.add_tab(tab);
     }
 
@@ -814,6 +844,19 @@ impl RoosteApp {
             }
             TabMenuAction::Log => self.toggle_log(id),
             TabMenuAction::Record => self.toggle_recording(id),
+            TabMenuAction::RunScript(name) => {
+                if let Some(dir) = self.scripts_dir()
+                    && let Some(tab) = self.tab_mut(id)
+                {
+                    tab.run_script(&dir.join(name));
+                }
+            }
+            TabMenuAction::StopScript => {
+                if let Some(tab) = self.tab_mut(id) {
+                    tab.stop_script();
+                }
+            }
+            TabMenuAction::OpenScriptsFolder => self.open_scripts_folder(),
             TabMenuAction::Reconnect => {
                 if let Some(tab) = self.tab_mut(id) {
                     tab.reconnect();
@@ -871,6 +914,34 @@ impl RoosteApp {
         );
     }
 
+    /// The folder scripts are kept in.
+    fn scripts_dir(&self) -> Option<PathBuf> {
+        crate::scripting::scripts_dir(self.config_path.as_deref())
+    }
+
+    /// Open the scripts folder in the file manager, creating it (with an
+    /// example script) the first time.
+    fn open_scripts_folder(&mut self) {
+        let Some(dir) = self.scripts_dir() else {
+            self.notify("Scripts need a configuration folder.", true);
+            return;
+        };
+        if let Err(e) = crate::scripting::ensure_scripts_dir(&dir) {
+            self.notify(format!("Could not create {}: {e}", dir.display()), true);
+            return;
+        }
+        let path = dir.display().to_string().replace('\\', "/");
+        let url = if path.starts_with('/') {
+            format!("file://{path}")
+        } else {
+            format!("file:///{path}")
+        };
+        if let Some(ctx) = &self.ctx {
+            ctx.open_url(egui::OpenUrl::new_tab(url));
+        }
+        self.notify(format!("Scripts are in {}", dir.display()), false);
+    }
+
     fn toggle_broadcast(&mut self) {
         self.broadcast = !self.broadcast;
         let count = self
@@ -916,6 +987,15 @@ impl RoosteApp {
                     self.toggle_log(id);
                 }
             }
+            Command::RunScript(name) => {
+                if let Some(dir) = self.scripts_dir()
+                    && let Some(id) = self.active_tab_id()
+                    && let Some(tab) = self.tab_mut(id)
+                {
+                    tab.run_script(&dir.join(name));
+                }
+            }
+            Command::OpenScriptsFolder => self.open_scripts_folder(),
             Command::ToggleRecording => {
                 if let Some(id) = self.active_tab_id() {
                     self.toggle_recording(id);
@@ -1077,6 +1157,7 @@ impl RoosteApp {
                             self.save_config();
                         }
                     }
+                    TabAction::Notify { text, error } => self.notify(text, error),
                     TabAction::RememberDownloadFolder(dir) => {
                         self.config.settings.last_download_to = dir.display().to_string();
                         self.save_config();
@@ -1127,6 +1208,7 @@ impl RoosteApp {
                     let mut behavior = TabBehavior {
                         close_requests: Vec::new(),
                         menu_actions: Vec::new(),
+                        scripts_dir: self.scripts_dir(),
                     };
                     let broadcast = self.broadcast;
                     for (_, tile) in self.tree.tiles.iter_mut() {
@@ -1464,10 +1546,15 @@ impl RoosteApp {
         };
         let keep = match &mut dialog {
             Dialog::EditProfile(editor) => {
+                let scripts = self
+                    .scripts_dir()
+                    .map(|dir| crate::scripting::list_scripts(&dir))
+                    .unwrap_or_default();
                 match editor.show(
                     ctx,
                     &self.config.folders(),
                     &self.serial_ports,
+                    &scripts,
                     &mut self.picker,
                 ) {
                     Decision::Pending => true,
@@ -1536,9 +1623,14 @@ impl RoosteApp {
                 }
             }
             Dialog::Palette { query } => {
+                let scripts = self
+                    .scripts_dir()
+                    .map(|dir| crate::scripting::list_scripts(&dir))
+                    .unwrap_or_default();
                 let commands = command_palette::commands(
                     &self.config.profiles,
                     self.active_tab_id().is_some(),
+                    &scripts,
                 );
                 match command_palette::show(ctx, query, &commands) {
                     Decision::Pending => true,
