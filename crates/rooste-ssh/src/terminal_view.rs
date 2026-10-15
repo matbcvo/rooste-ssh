@@ -439,8 +439,9 @@ impl TerminalView {
             }
         }
 
-        if let Some((col, row)) = screen.cursor {
-            let c = screen.row(row)[col];
+        if let Some((col, row)) = screen.cursor
+            && let Some(&c) = screen.row(row).get(col)
+        {
             let width = if c.wide { 2.0 } else { 1.0 } * cell.x;
             let min = pos2(
                 metrics.origin.x + col as f32 * cell.x,

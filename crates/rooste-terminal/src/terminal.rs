@@ -230,6 +230,20 @@ impl Terminal {
     /// Process output from the remote side.
     pub fn advance(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
+        self.repair_cursor_cell();
+    }
+
+    /// Some escape sequences can leave the cursor on a wide character spacer
+    /// in the first column, which belongs to no character. alacritty steps the
+    /// cursor back one column from a spacer, which would underflow there, so
+    /// turn that cell into a normal one.
+    fn repair_cursor_cell(&mut self) {
+        let point = self.term.grid().cursor.point;
+        if point.column.0 == 0 {
+            self.term.grid_mut()[point]
+                .flags
+                .remove(Flags::WIDE_CHAR_SPACER);
+        }
     }
 
     /// Events produced since the last call.
@@ -259,6 +273,7 @@ impl Terminal {
             .unwrap_or_else(|e| e.into_inner()) = window_size(cols, rows, cell_width, cell_height);
         if (cols, rows) != (self.term.columns(), self.term.screen_lines()) {
             self.term.resize(Size { cols, rows });
+            self.repair_cursor_cell();
         }
     }
 

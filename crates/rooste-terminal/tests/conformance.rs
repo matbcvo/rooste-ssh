@@ -279,3 +279,16 @@ fn find_walks_through_matches_in_the_scrollback() {
     term.clear_search();
     assert_eq!(term.selection_text(), None);
 }
+
+/// Found by fuzzing: this left the cursor on a wide character spacer in the
+/// first column, and drawing the screen panicked.
+#[test]
+fn cursor_on_spacer_in_first_column() {
+    let mut t = Terminal::new(40, 12);
+    t.advance(b"\xe7\x9b\x8c\x1b\r[$\xdb\x9b\x8c\x1b\r[\xe4\xaf\xb8\x11P");
+    let screen = t.screen();
+    let (col, row) = screen.cursor.expect("cursor visible");
+    assert!(col < 40 && row < 12);
+    t.resize(23, 7, 8, 16);
+    let _ = t.screen();
+}
