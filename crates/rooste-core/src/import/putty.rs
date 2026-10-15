@@ -171,10 +171,10 @@ fn decode_session_name(name: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&name[i + 1..i + 3], 16)
+            && let Some(&[high, low]) = bytes.get(i + 1..i + 3)
+            && let (Some(high), Some(low)) = (hex_value(high), hex_value(low))
         {
-            out.push(byte);
+            out.push(high << 4 | low);
             i += 3;
             continue;
         }
@@ -182,6 +182,10 @@ fn decode_session_name(name: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_value(digit: u8) -> Option<u8> {
+    (digit as char).to_digit(16).map(|v| v as u8)
 }
 
 #[cfg(test)]
@@ -250,6 +254,11 @@ TerminalType=xterm
     fn name_decoding() {
         assert_eq!(decode_session_name("a%20b%2Fc"), "a b/c");
         assert_eq!(decode_session_name("%C3%B5ige"), "õige");
+        assert_eq!(decode_session_name("a%2"), "a%2");
+        assert_eq!(decode_session_name("a%+1"), "a%+1");
+        // Found by fuzzing: a multi-byte character right after `%`.
+        assert_eq!(decode_session_name("%A\u{6f9}x"), "%A\u{6f9}x");
+        assert_eq!(decode_session_name("%\u{6f9}"), "%\u{6f9}");
         assert_eq!(decode_session_name("100%"), "100%");
         assert_eq!(decode_session_name("%zz"), "%zz");
     }
