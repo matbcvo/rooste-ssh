@@ -266,9 +266,17 @@ jobs:
           Copy-Item crates/rooste-testkit/docker/authorized_keys $keys
           icacls $keys /inheritance:r /grant "*S-1-5-32-544:F" /grant "SYSTEM:F"
           Restart-Service sshd
-          $out = & $cli.FullName -i crates/rooste-testkit/keys/id_ed25519 --no-agent --host-key accept-new --known-hosts "$env:RUNNER_TEMP\known_hosts" "$env:ROOSTE_TEST_SSH_USER@127.0.0.1" echo smoke-ok
-          Write-Output $out
-          if (($out | Out-String).Trim() -ne "smoke-ok") { exit 1 }
+          # sshd can take a moment after a restart; wait for the port, then
+          # allow a few attempts.
+          for ($i = 0; $i -lt 30 -and -not (Test-NetConnection 127.0.0.1 -Port 22 -InformationLevel Quiet); $i++) { Start-Sleep 1 }
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            $out = & $cli.FullName -i crates/rooste-testkit/keys/id_ed25519 --no-agent --host-key accept-new --known-hosts "$env:RUNNER_TEMP\known_hosts" "$env:ROOSTE_TEST_SSH_USER@127.0.0.1" echo smoke-ok
+            Write-Output $out
+            if (($out | Out-String).Trim() -eq "smoke-ok") { exit 0 }
+            Write-Output "Login attempt $attempt failed; retrying"
+            Start-Sleep 3
+          }
+          exit 1
       - name: Smoke test the portable zip
         shell: pwsh
         run: |
