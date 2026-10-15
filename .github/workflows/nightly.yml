@@ -74,7 +74,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz
-      - run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=300
+      # The prebuilt cargo-fuzz is a static musl binary and would default to
+      # that target, which the address sanitizer doesn't support.
+      - run: cargo fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} -- -max_total_time=300
       - name: Upload crash inputs
         if: failure()
         uses: actions/upload-artifact@v7
