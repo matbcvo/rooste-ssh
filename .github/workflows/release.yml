@@ -333,6 +333,57 @@ jobs:
           manifest-path: packaging/flatpak/ee.prica.rooste-ssh.yml
           cache: false
 
+  snap:
+    name: Snap
+    needs: linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-binaries
+          path: packaging/snap/staging
+      - uses: actions/download-artifact@v8
+        with:
+          name: notices
+          path: packaging/snap/staging
+      - name: Stage files
+        run: |
+          cp packaging/linux/* packaging/icons/icon-256.png packaging/snap/staging/
+          cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name=="rooste-ssh") | .version' > packaging/snap/staging/VERSION
+          ls -la packaging/snap/staging
+      - uses: snapcore/action-build@v1
+        id: build
+        with:
+          path: packaging/snap
+      - uses: actions/upload-artifact@v7
+        with:
+          name: snap
+          path: ${{ steps.build.outputs.snap }}
+
+  # Needs classic confinement approved for rooste-ssh in the Snap Store and an
+  # upload token in the SNAPCRAFT_STORE_CREDENTIALS secret; then set the
+  # repository variable SNAP_STORE_PUBLISH to "true".
+  snap-store:
+    name: Publish to the Snap Store
+    if: startsWith(github.ref, 'refs/tags/v') && vars.SNAP_STORE_PUBLISH == 'true'
+    needs: [publish, snap]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: snap
+      - name: Find the snap
+        id: file
+        run: echo "snap=$(ls rooste-ssh_*.snap)" >> "$GITHUB_OUTPUT"
+      - uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.file.outputs.snap }}
+          release: stable
+
   publish:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
