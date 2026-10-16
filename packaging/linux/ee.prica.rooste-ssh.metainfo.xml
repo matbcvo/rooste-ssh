@@ -25,6 +25,10 @@
     <binary>rooste-cli</binary>
   </provides>
   <releases>
+    <release version="0.3.0" date="2026-10-16"/>
+    <release version="0.2.1" date="2026-10-15"/>
+    <release version="0.2.0" date="2026-10-14"/>
+    <release version="0.1.1" date="2026-10-14"/>
     <release version="0.1.0" date="2026-10-14"/>
   </releases>
 </component>
