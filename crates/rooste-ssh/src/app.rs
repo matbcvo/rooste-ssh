@@ -127,6 +127,10 @@ struct TabBehavior {
     menu_actions: Vec<(TileId, TabMenuAction)>,
     /// Where scripts are kept, for the "Run script" menu.
     scripts_dir: Option<PathBuf>,
+    /// The selected tab being drawn and whether its terminal has keyboard
+    /// focus, noted while choosing its text color (egui_tiles tells only that
+    /// hook) for its accent line.
+    selected_tab: std::cell::Cell<Option<(TileId, bool)>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,15 +191,93 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
         12.0
     }
 
+    /// Unselected tabs get a background between the bar's and the selected
+    /// tab's, and an outline, so they still look like tabs.
+    fn tab_bg_color(
+        &self,
+        visuals: &egui::Visuals,
+        _tiles: &egui_tiles::Tiles<SessionTab>,
+        _tile_id: TileId,
+        state: &egui_tiles::TabState,
+    ) -> egui::Color32 {
+        if state.active {
+            visuals.panel_fill
+        } else {
+            self.tab_bar_color(visuals)
+                .lerp_to_gamma(visuals.panel_fill, 0.5)
+        }
+    }
+
+    fn tab_outline_stroke(
+        &self,
+        visuals: &egui::Visuals,
+        _tiles: &egui_tiles::Tiles<SessionTab>,
+        _tile_id: TileId,
+        state: &egui_tiles::TabState,
+    ) -> egui::Stroke {
+        if state.active {
+            egui::Stroke::new(1.0, visuals.widgets.active.bg_fill)
+        } else {
+            egui::Stroke::new(1.0, visuals.widgets.noninteractive.bg_stroke.color)
+        }
+    }
+
+    fn tab_text_color(
+        &self,
+        visuals: &egui::Visuals,
+        tiles: &egui_tiles::Tiles<SessionTab>,
+        tile_id: TileId,
+        state: &egui_tiles::TabState,
+    ) -> egui::Color32 {
+        if state.active {
+            let focused = matches!(tiles.get(tile_id), Some(Tile::Pane(tab)) if tab.view.has_focus);
+            self.selected_tab.set(Some((tile_id, focused)));
+            visuals.strong_text_color()
+        } else {
+            visuals.weak_text_color()
+        }
+    }
+
     fn on_tab_button(
         &mut self,
         tiles: &mut egui_tiles::Tiles<SessionTab>,
         tile_id: TileId,
         response: egui::Response,
     ) -> egui::Response {
+        if response.clicked()
+            && let Some(Tile::Pane(tab)) = tiles.get_mut(tile_id)
+        {
+            tab.view.focus_requested = true;
+        }
         let Some(Tile::Pane(tab)) = tiles.get(tile_id) else {
             return response;
         };
+        // A line along the top of the selected tab in each group: in the
+        // accent color where the keyboard input goes, grey in other groups.
+        if let Some((selected, focused)) = self.selected_tab.take()
+            && selected == tile_id
+        {
+            let visuals = &response.ctx.global_style().visuals;
+            let accent = if focused {
+                visuals.hyperlink_color
+            } else {
+                egui::Color32::from_gray(if visuals.dark_mode { 110 } else { 160 })
+            };
+            // Matches the outline, which egui_tiles draws half a point inside.
+            let rect = response.rect.shrink(0.5);
+            response
+                .ctx
+                .layer_painter(response.layer_id)
+                .with_clip_rect(response.interact_rect)
+                .rect_filled(
+                    egui::Rect::from_min_max(
+                        rect.left_top(),
+                        egui::pos2(rect.right(), rect.top() + 3.0),
+                    ),
+                    0.0,
+                    accent,
+                );
+        }
         let ended = tab.has_ended();
         let logging = tab.log.is_some();
         let recording = tab.recording.is_some();
@@ -1209,6 +1291,7 @@ impl RoosteApp {
                         close_requests: Vec::new(),
                         menu_actions: Vec::new(),
                         scripts_dir: self.scripts_dir(),
+                        selected_tab: std::cell::Cell::new(None),
                     };
                     let broadcast = self.broadcast;
                     for (_, tile) in self.tree.tiles.iter_mut() {
