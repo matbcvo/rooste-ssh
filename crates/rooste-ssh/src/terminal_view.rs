@@ -44,6 +44,10 @@ pub struct TerminalView {
     /// Mouse button currently held while reporting to the application.
     reported_button: Option<MouseButton>,
     selecting: bool,
+    /// Take keyboard focus on the next frame, e.g. when its tab is clicked.
+    pub focus_requested: bool,
+    /// Whether the terminal had keyboard focus when last shown.
+    pub has_focus: bool,
 }
 
 impl Default for TerminalView {
@@ -58,6 +62,8 @@ impl Default for TerminalView {
             last_click: None,
             reported_button: None,
             selecting: false,
+            focus_requested: false,
+            has_focus: false,
         }
     }
 }
@@ -134,7 +140,8 @@ impl TerminalView {
         // (egui applies it at the end of the frame), so don't take it then.
         let nothing_focused = ui.memory(|m| m.focused().is_none())
             && !ui.input(|i| i.pointer.any_pressed() || i.pointer.any_released());
-        if nothing_focused || response.clicked() || response.drag_started() {
+        let requested = std::mem::take(&mut self.focus_requested);
+        if nothing_focused || requested || response.clicked() || response.drag_started() {
             ui.memory_mut(|m| m.request_focus(id));
         }
         ui.memory_mut(|m| {
@@ -158,7 +165,8 @@ impl TerminalView {
         }
         self.handle_mouse(ui, term, &response, metrics, &mut out);
 
-        self.paint(ui, rect, metrics, &term.screen(), response.has_focus());
+        self.has_focus = response.has_focus();
+        self.paint(ui, rect, metrics, &term.screen(), self.has_focus);
         out
     }
 
