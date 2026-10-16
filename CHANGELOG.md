@@ -4,7 +4,7 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-10-16
 
 ### Added
 
@@ -14,6 +14,19 @@ All notable changes are listed here. The format follows
 - Session recordings: "Record session…" (Tab menu, the tab's right-click menu, the command palette)
   saves an asciinema `.cast` file that replays the session with its timing. Only output is
   recorded, never what you type.
+- A snap package (`rooste-ssh`), to be published in the Snap Store once it's approved there.
+
+### Changed
+
+- The selected tab is easier to see: a line along its top (blue where your typing goes, grey in
+  the other half of a split), and unselected tabs look like tabs. Clicking a tab moves the
+  keyboard focus to it.
+
+### Fixed
+
+- A crash when a server sent output that left the cursor on the second half of a wide character
+  in the first column.
+- A crash importing a PuTTY session whose name has a non-ASCII character right after `%`.
 
 ## [0.2.1] - 2026-10-15
 
@@ -85,6 +98,7 @@ The first release.
 - Windows MSI installer and portable zip; Linux `.deb`, `.rpm`, AppImage, `.tar.gz` and Flatpak.
 - Optional check for new releases at startup.
 
+[0.3.0]: https://github.com/rooste-ssh/rooste-ssh/releases/tag/v0.3.0
 [0.2.1]: https://github.com/rooste-ssh/rooste-ssh/releases/tag/v0.2.1
 [0.2.0]: https://github.com/rooste-ssh/rooste-ssh/releases/tag/v0.2.0
 [0.1.1]: https://github.com/rooste-ssh/rooste-ssh/releases/tag/v0.1.1
