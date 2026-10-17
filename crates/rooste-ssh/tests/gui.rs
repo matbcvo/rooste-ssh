@@ -1009,27 +1009,111 @@ fn a_new_split_takes_the_keyboard_focus() {
     });
     settle(&mut harness);
 
-    // The split's second group holds the new tab.
-    let app = harness.state();
+    assert_eq!(
+        split_focus(harness.state()),
+        (false, true),
+        "the new tab has the focus"
+    );
+}
+
+/// Whether the selected tab of the top and the bottom half of a split has
+/// the keyboard focus.
+fn split_focus(app: &RoosteApp) -> (bool, bool) {
     let Some(egui_tiles::Tile::Container(egui_tiles::Container::Linear(split))) =
         app.tree.tiles.get(app.tree.root.unwrap())
     else {
         panic!("the root is a split");
     };
-    let pane_in = |group| match app.tree.tiles.get(group) {
+    let focused = |group| match app.tree.tiles.get(group) {
         Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) => {
-            app.tree.tiles.get_pane(&tabs.active.unwrap()).unwrap()
+            app.tree
+                .tiles
+                .get_pane(&tabs.active.unwrap())
+                .unwrap()
+                .view
+                .has_focus
         }
         _ => panic!("a tab group"),
     };
-    assert!(
-        !pane_in(split.children[0]).view.has_focus,
-        "the old tab lost the focus"
-    );
-    assert!(
-        pane_in(split.children[1]).view.has_focus,
-        "the new tab has the focus"
-    );
+    (focused(split.children[0]), focused(split.children[1]))
+}
+
+#[test]
+fn switching_tabs_keeps_the_focus_out_of_the_other_half() {
+    let f = Fixture::with_server();
+    let mut harness = harness(app_with(&f, vec![f.profile("one")]));
+    context_menu(&mut harness, "one", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+    open_menu_item(&mut harness, "Tab", "Split down");
+    wait_for(&mut harness, "both connected", |app| {
+        connected_count(app) == 2
+    });
+    settle(&mut harness);
+    assert_eq!(split_focus(harness.state()), (false, true));
+
+    // A second tab in the bottom half, from the bottom tab's menu.
+    let bottom_tabs = |harness: &Harness<'_, RoosteApp>| {
+        let mut rects: Vec<egui::Rect> = harness
+            .get_all_by_label("one")
+            .map(|node| node.rect())
+            .collect();
+        let bottom = rects.iter().map(|r| r.center().y).fold(f32::MIN, f32::max);
+        rects.retain(|r| (r.center().y - bottom).abs() < 1.0);
+        rects.sort_by(|a, b| a.left().total_cmp(&b.left()));
+        rects
+    };
+    let first = bottom_tabs(&harness)[0].center();
+    harness.event(egui::Event::PointerMoved(first));
+    settle(&mut harness);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: first,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        });
+    }
+    settle(&mut harness);
+    harness.get_by_label("Duplicate tab").click();
+    wait_for(&mut harness, "three connected", |app| {
+        connected_count(app) == 3
+    });
+    settle(&mut harness);
+    assert_eq!(bottom_tabs(&harness).len(), 2);
+    assert_eq!(split_focus(harness.state()), (false, true));
+
+    // Press on the other bottom tab and hold, then release: the press takes
+    // the focus from the bottom terminal and the release switches tabs, and
+    // the top terminal must not grab the focus in between.
+    let pos = bottom_tabs(&harness)[0].center();
+    harness.event(egui::Event::PointerMoved(pos));
+    harness.event(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::default(),
+    });
+    for _ in 0..6 {
+        harness.step();
+        assert!(
+            !split_focus(harness.state()).0,
+            "the top tab took the focus"
+        );
+    }
+    harness.event(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::default(),
+    });
+    for _ in 0..6 {
+        harness.step();
+        assert!(
+            !split_focus(harness.state()).0,
+            "the top tab took the focus"
+        );
+    }
+    assert_eq!(split_focus(harness.state()), (false, true));
 }
 
 #[test]

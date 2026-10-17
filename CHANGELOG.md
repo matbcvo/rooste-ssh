@@ -4,7 +4,7 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] - 2026-10-17
 
 ### Changed
 
@@ -18,6 +18,7 @@ All notable changes are listed here. The format follows
 
 - A new tab or split now takes the keyboard focus, and the tab bar shows it right away. Before,
   the focus could stay in (or jump back to) the other half of a split.
+- Switching tabs in one half of a split no longer flashes the focus line in the other half.
 
 ## [0.3.0] - 2026-10-16
 
@@ -113,6 +114,7 @@ The first release.
 - Windows MSI installer and portable zip; Linux `.deb`, `.rpm`, AppImage, `.tar.gz` and Flatpak.
 - Optional check for new releases at startup.
 
+[0.4.0]: https://github.com/rooste-ssh/rooste-ssh/releases/tag/v0.4.0
 [0.3.0]: https://github.com/rooste-ssh/rooste-ssh/releases/tag/v0.3.0
 [0.2.1]: https://github.com/rooste-ssh/rooste-ssh/releases/tag/v0.2.1
 [0.2.0]: https://github.com/rooste-ssh/rooste-ssh/releases/tag/v0.2.0

@@ -382,6 +382,9 @@ pub struct RoosteApp {
     imports: ImportSources,
     window_title: String,
     applied_theme: Option<Theme>,
+    /// Each tab group's selected tab in the last frame, to move the keyboard
+    /// focus along when it changes.
+    selected_tabs: std::collections::HashMap<TileId, TileId>,
 }
 
 impl std::fmt::Debug for RoosteApp {
@@ -460,6 +463,7 @@ impl RoosteApp {
             imports: ImportSources::default(),
             window_title: String::new(),
             applied_theme: None,
+            selected_tabs: std::collections::HashMap::new(),
         }
     }
 
@@ -771,6 +775,35 @@ impl RoosteApp {
                 self.tree.root = Some(tabs);
             }
         }
+    }
+
+    /// When a tab group switches to another tab (egui_tiles does that on
+    /// mouse press, before a click), the new tab takes the keyboard focus if
+    /// the old one had it.
+    fn follow_tab_switches(&mut self) {
+        let selected: std::collections::HashMap<TileId, TileId> = self
+            .tree
+            .tiles
+            .iter()
+            .filter_map(|(&group, tile)| match tile {
+                Tile::Container(Container::Tabs(tabs)) => tabs.active.map(|tab| (group, tab)),
+                _ => None,
+            })
+            .collect();
+        for (group, &tab) in &selected {
+            if let Some(&old) = self.selected_tabs.get(group)
+                && old != tab
+                && self
+                    .tree
+                    .tiles
+                    .get_pane(&old)
+                    .is_some_and(|t| t.view.has_focus)
+                && let Some(new) = self.tab_mut(tab)
+            {
+                new.view.focus_requested = true;
+            }
+        }
+        self.selected_tabs = selected;
     }
 
     fn request_close(&mut self, id: TileId) {
@@ -1302,7 +1335,12 @@ impl RoosteApp {
                             tab.broadcast = broadcast && tab.state == TabState::Connected;
                         }
                     }
+                    crate::terminal_view::set_focus_pending(
+                        ui.ctx(),
+                        self.tabs().any(|tab| tab.view.focus_requested),
+                    );
                     self.tree.ui(&mut behavior, ui);
+                    self.follow_tab_switches();
                     self.deliver_broadcast();
                     for id in behavior.close_requests {
                         self.request_close(id);
