@@ -63,6 +63,19 @@ fn put_string(out: &mut Vec<u8>, value: &[u8]) {
     out.extend_from_slice(value);
 }
 
+/// `value` (a positive big-endian number) as an SSH mpint: without leading
+/// zero bytes, except one when the top bit is set. A key's numbers can come
+/// with a needless leading zero, which strict readers reject.
+fn put_mpint(out: &mut Vec<u8>, value: &[u8]) {
+    let digits = &value[value.iter().take_while(|&&b| b == 0).count()..];
+    let mut mpint = Zeroizing::new(Vec::with_capacity(digits.len() + 1));
+    if digits.first().is_some_and(|&b| b & 0x80 != 0) {
+        mpint.push(0);
+    }
+    mpint.extend_from_slice(digits);
+    put_string(out, &mpint);
+}
+
 /// Public blob, private blob and comment, in PPK layout.
 struct PpkParts {
     algorithm: String,
@@ -106,12 +119,12 @@ fn parts(key: &PrivateKey) -> Result<PpkParts, KeyError> {
             let (_n, _e) = (s.string()?, s.string()?);
             let (d, iqmp, p, q) = (s.string()?, s.string()?, s.string()?, s.string()?);
             for mpint in [d, p, q, iqmp] {
-                put_string(&mut private, mpint);
+                put_mpint(&mut private, mpint);
             }
         }
         name if name.starts_with("ecdsa-sha2-") => {
             let (_curve, _point) = (s.string()?, s.string()?);
-            put_string(&mut private, s.string()?);
+            put_mpint(&mut private, s.string()?);
         }
         other => return Err(KeyError::Unsupported(other.to_owned())),
     }
@@ -256,6 +269,37 @@ mod tests {
         assert_eq!(lines(b"foo"), "Zm9v");
         assert_eq!(lines(b"foobar"), "Zm9vYmFy");
         assert_eq!(base64_lines(&[0u8; 100]).len(), 3, "64 characters per line");
+    }
+
+    #[test]
+    fn mpints_are_minimal() {
+        let mpint = |value: &[u8]| {
+            let mut out = Vec::new();
+            put_mpint(&mut out, value);
+            out[4..].to_vec()
+        };
+        assert_eq!(mpint(&[0x00, 0x13, 0x37]), [0x13, 0x37]);
+        assert_eq!(mpint(&[0x00, 0x00, 0x7f]), [0x7f]);
+        assert_eq!(mpint(&[0x80, 0x01]), [0x00, 0x80, 0x01]);
+        assert_eq!(mpint(&[0x00, 0x80, 0x01]), [0x00, 0x80, 0x01]);
+        assert_eq!(mpint(&[0x00, 0x00]), [] as [u8; 0]);
+    }
+
+    /// Found by CI: about one P-256 key in several hundred has a private
+    /// scalar with a leading zero byte, which was copied into the .ppk as is.
+    #[test]
+    fn ecdsa_keys_with_a_leading_zero_round_trip() {
+        let key = (0..20_000)
+            .map(|_| generate(KeyType::EcdsaP256, "zero").unwrap())
+            // A scalar whose top byte is zero and doesn't need it as a sign
+            // byte, so its minimal mpint is shorter than 32 bytes.
+            .find(|key| {
+                let scalar = key.key_data().ecdsa().unwrap().private_key_bytes();
+                scalar[0] == 0 && scalar[1] & 0x80 == 0
+            })
+            .expect("a key whose scalar has a leading zero");
+        let plain = export(&key, None).unwrap();
+        assert_eq!(import(&plain, None).unwrap().public_key(), key.public_key());
     }
 
     #[test]
