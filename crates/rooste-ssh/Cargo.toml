@@ -13,7 +13,7 @@ keywords = ["ssh", "ssh-client", "sftp", "terminal", "gui"]
 categories = ["network-programming", "command-line-utilities", "gui"]
 
 [[bin]]
-name = "rooste"
+name = "rooste-ssh"
 path = "src/main.rs"
 
 [dependencies]
@@ -64,7 +64,7 @@ category = "DeveloperTool"
 icons = ["../../packaging/icons/icon-32.png", "../../packaging/icons/icon-128.png", "../../packaging/icons/icon-256.png", "../../packaging/icons/rooste.ico"]
 binaries-dir = "../../target/release"
 out-dir = "../../target/packages"
-binaries = [{ path = "rooste", main = true }, { path = "rooste-cli" }]
+binaries = [{ path = "rooste-ssh", main = true }, { path = "rooste-cli" }]
 resources = ["../../LICENSE", "../../target/notices/THIRD-PARTY-LICENSES.html"]
 
 # RPM (cargo generate-rpm -p crates/rooste-ssh).
@@ -73,7 +73,7 @@ name = "rooste-ssh"
 summary = "SSH, telnet and serial terminal with tabs, SFTP and port forwarding"
 license = "MIT"
 assets = [
-    { source = "target/release/rooste", dest = "/usr/bin/rooste", mode = "755" },
+    { source = "target/release/rooste-ssh", dest = "/usr/bin/rooste-ssh", mode = "755" },
     { source = "target/release/rooste-cli", dest = "/usr/bin/rooste-cli", mode = "755" },
     { source = "packaging/linux/ee.prica.rooste-ssh.desktop", dest = "/usr/share/applications/ee.prica.rooste-ssh.desktop", mode = "644" },
     { source = "packaging/linux/ee.prica.rooste-ssh.metainfo.xml", dest = "/usr/share/metainfo/ee.prica.rooste-ssh.metainfo.xml", mode = "644" },

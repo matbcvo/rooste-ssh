@@ -9,7 +9,7 @@ const ICON: &[u8] = include_bytes!("../assets/icon-64.rgba");
 
 fn main() -> eframe::Result {
     if std::env::args().any(|a| a == "--version" || a == "-V") {
-        println!("rooste {}", env!("CARGO_PKG_VERSION"));
+        println!("rooste-ssh {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     let options = eframe::NativeOptions {

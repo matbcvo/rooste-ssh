@@ -13,7 +13,7 @@ Scripts are `.rhai` files in the **scripts folder**, next to the configuration f
 | Linux | `~/.config/rooste-ssh/scripts/` |
 | Windows | `%APPDATA%\rooste-ssh\scripts\` |
 | macOS | `~/Library/Application Support/rooste-ssh/scripts/` |
-| Portable | `scripts\` next to `rooste.exe` |
+| Portable | `scripts\` next to `rooste-ssh.exe` |
 
 The easiest way to get there is **Open scripts folder**, in a tab's right-click menu (under **Run
 script**) or in the command palette (Ctrl+Shift+P). The first time, Rooste creates the folder with

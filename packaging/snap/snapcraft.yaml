@@ -20,7 +20,7 @@ platforms:
 
 apps:
   rooste-ssh:
-    command: bin/rooste
+    command: bin/rooste-ssh
     desktop: usr/share/applications/rooste-ssh.desktop
     common-id: ee.prica.rooste-ssh
   cli:
@@ -33,7 +33,7 @@ parts:
     # Summary and description come from the AppStream file.
     parse-info: [usr/share/metainfo/ee.prica.rooste-ssh.metainfo.xml]
     override-build: |
-      install -Dm755 rooste "$CRAFT_PART_INSTALL/bin/rooste"
+      install -Dm755 rooste-ssh "$CRAFT_PART_INSTALL/bin/rooste-ssh"
       install -Dm755 rooste-cli "$CRAFT_PART_INSTALL/bin/rooste-cli"
       install -Dm644 ee.prica.rooste-ssh.metainfo.xml \
         "$CRAFT_PART_INSTALL/usr/share/metainfo/ee.prica.rooste-ssh.metainfo.xml"

@@ -25,7 +25,7 @@ body:
     id: version
     attributes:
       label: Rooste SSH version
-      description: Shown by `rooste --version`.
+      description: Shown by `rooste-ssh --version`.
       placeholder: "0.1.0"
     validations:
       required: true

@@ -4,6 +4,16 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The desktop app's command is now `rooste-ssh` (it was `rooste`), matching the project, package
+  and crate names. On Windows the program is `rooste-ssh.exe`; if you use the portable zip, delete
+  the old `rooste.exe` after unzipping the new version over it. The portable settings file is now
+  `rooste-ssh.toml`; an existing `rooste.toml` is renamed automatically. The command-line client
+  is still `rooste-cli`.
+
 ## [0.3.0] - 2026-10-16
 
 ### Added

@@ -58,7 +58,7 @@ crates/
 ├─ rooste-terminal/   alacritty_terminal wrapper: input encoding, selection, scrollback
 ├─ rooste-keys/       key generation, .ppk import/export, agent client/server
 ├─ rooste-sftp/       SFTP operations, transfer queue
-├─ rooste-ssh/        egui app (binary `rooste`): tabs, splits, session manager, settings
+├─ rooste-ssh/        egui app (binary `rooste-ssh`): tabs, splits, session manager, settings
 ├─ rooste-cli/        headless client
 └─ rooste-testkit/    shared test fixtures
 ```
@@ -105,8 +105,8 @@ Each milestone is done only when its tests pass in CI on **both Linux and Window
 - Tabs, settings dialog, host-key confirmation dialog.
 - Passwords in the OS credential store (Windows Credential Manager, Secret Service on Linux);
   password and key-passphrase prompts with retry, as `ssh` does.
-- Config file: `config.toml` in the platform config directory, or `rooste.toml` next to the
-  executable in portable mode (a `rooste.toml` or empty `portable` file there enables it).
+- Config file: `config.toml` in the platform config directory, or `rooste-ssh.toml` next to the
+  executable in portable mode (a `rooste-ssh.toml` or empty `portable` file there enables it).
 - **Tests required:** `egui_kittest` tests for every new screen and dialog. Done: session manager,
   profile editor, search, context menu, imports, settings, password prompt, tab closing;
   property tests for config round-trips and the `ssh_config` parser.
@@ -224,7 +224,7 @@ Windows-only code (named-pipe agent, registry import) gets Windows-only tests.
   interop matrix, beta and nightly toolchains, benchmarks compared with the previous run. The
   legacy-server check must **fail** with defaults and **succeed** with legacy enabled.
 - **`release.yml`** (on `v*` tags, M6): build, install the packaged MSI/`.deb`, run
-  `rooste --version` and a test connection, sign, publish.
+  `rooste-ssh --version` and a test connection, sign, publish.
 - Dependabot for Cargo, GitHub Actions and Docker; branch protection on `main` requiring CI.
 
 ## Security
