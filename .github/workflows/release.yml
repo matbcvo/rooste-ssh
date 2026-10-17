@@ -67,8 +67,8 @@ jobs:
         run: |
           v=${{ steps.version.outputs.version }}
           cd target/packages
-          mv rooste_${v}_amd64.deb rooste-ssh-${v}-amd64.deb
-          mv rooste_${v}_x86_64.AppImage rooste-ssh-${v}-x86_64.AppImage
+          mv rooste-ssh_${v}_amd64.deb rooste-ssh-${v}-amd64.deb
+          mv rooste-ssh_${v}_x86_64.AppImage rooste-ssh-${v}-x86_64.AppImage
           ls -la
       - name: Tarball
         run: |
