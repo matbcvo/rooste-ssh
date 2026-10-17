@@ -90,7 +90,7 @@ With Rust installed, you can also install from [crates.io](https://crates.io/cra
 `cargo install rooste-ssh` (the desktop app) and `cargo install rooste-cli`. `cargo binstall
 rooste-ssh` downloads the release binaries instead of compiling.
 
-Every release lists SHA-256 checksums in `SHA256SUMS`. Both programs are included: `rooste` (the
+Every release lists SHA-256 checksums in `SHA256SUMS`. Both programs are included: `rooste-ssh` (the
 desktop app) and `rooste-cli` (command line).
 
 ## Using it
@@ -134,7 +134,7 @@ Settings and saved sessions are stored in `config.toml` in the platform config d
 (`~/.config/rooste-ssh/` on Linux, `%APPDATA%\rooste-ssh\` on Windows,
 `~/Library/Application Support/rooste-ssh/` on macOS). To run portably,
 for example from a USB stick, put an empty file named `portable` next to the executable; the
-configuration is then kept in `rooste.toml` beside it. Saved passwords go to the system keyring,
+configuration is then kept in `rooste-ssh.toml` beside it. Saved passwords go to the system keyring,
 never into the configuration file.
 
 ## Building from source

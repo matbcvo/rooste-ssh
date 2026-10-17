@@ -1,7 +1,7 @@
 //! The configuration file: settings and saved profiles, as TOML.
 //!
 //! The file lives in the platform config directory, or next to the
-//! executable in portable mode (when a `rooste.toml` or `portable` file
+//! executable in portable mode (when a `rooste-ssh.toml` or `portable` file
 //! exists there), so the app can run from a USB stick.
 
 use std::io;
@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use crate::Profile;
 
 const FILE_NAME: &str = "config.toml";
-const PORTABLE_FILE_NAME: &str = "rooste.toml";
+const PORTABLE_FILE_NAME: &str = "rooste-ssh.toml";
+/// The portable file's name before 0.4.0, renamed when found.
+const OLD_PORTABLE_FILE_NAME: &str = "rooste.toml";
 const PORTABLE_MARKER: &str = "portable";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,8 +218,8 @@ pub struct ConfigLocation {
 }
 
 impl ConfigLocation {
-    /// Portable mode if the executable's directory holds `rooste.toml` or a
-    /// `portable` marker; otherwise the platform config directory.
+    /// Portable mode if the executable's directory holds `rooste-ssh.toml` or
+    /// a `portable` marker; otherwise the platform config directory.
     pub fn detect() -> Self {
         let exe_dir = std::env::current_exe()
             .ok()
@@ -237,8 +239,14 @@ impl ConfigLocation {
     }
 
     /// The portable location in `dir`, if portable mode is enabled there.
+    /// A `rooste.toml` from before 0.4.0 is renamed to `rooste-ssh.toml`, or
+    /// used as it is if it can't be renamed (e.g. on a read-only drive).
     pub fn portable_in(dir: &Path) -> Option<Self> {
-        let path = dir.join(PORTABLE_FILE_NAME);
+        let mut path = dir.join(PORTABLE_FILE_NAME);
+        let old = dir.join(OLD_PORTABLE_FILE_NAME);
+        if !path.exists() && old.exists() && std::fs::rename(&old, &path).is_err() {
+            path = old;
+        }
         (path.exists() || dir.join(PORTABLE_MARKER).exists()).then_some(Self {
             path,
             portable: true,
@@ -351,7 +359,20 @@ mod tests {
         std::fs::write(dir.path().join("portable"), "").unwrap();
         let location = ConfigLocation::portable_in(dir.path()).unwrap();
         assert!(location.portable);
-        assert_eq!(location.path, dir.path().join("rooste.toml"));
+        assert_eq!(location.path, dir.path().join("rooste-ssh.toml"));
+    }
+
+    #[test]
+    fn old_portable_file_is_renamed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("rooste.toml"), "[settings]\n").unwrap();
+        let location = ConfigLocation::portable_in(dir.path()).unwrap();
+        assert_eq!(location.path, dir.path().join("rooste-ssh.toml"));
+        assert_eq!(
+            std::fs::read_to_string(&location.path).unwrap(),
+            "[settings]\n"
+        );
+        assert!(!dir.path().join("rooste.toml").exists());
     }
 
     fn arb_profile() -> impl Strategy<Value = Profile> {

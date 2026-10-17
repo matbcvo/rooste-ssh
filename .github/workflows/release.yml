@@ -67,21 +67,21 @@ jobs:
         run: |
           v=${{ steps.version.outputs.version }}
           cd target/packages
-          mv rooste_${v}_amd64.deb rooste-ssh-${v}-amd64.deb
-          mv rooste_${v}_x86_64.AppImage rooste-ssh-${v}-x86_64.AppImage
+          mv rooste-ssh_${v}_amd64.deb rooste-ssh-${v}-amd64.deb
+          mv rooste-ssh_${v}_x86_64.AppImage rooste-ssh-${v}-x86_64.AppImage
           ls -la
       - name: Tarball
         run: |
           name=rooste-ssh-${{ steps.version.outputs.version }}-linux-x86_64
           mkdir -p "target/$name"
-          cp target/release/rooste target/release/rooste-cli LICENSE target/notices/THIRD-PARTY-LICENSES.html \
+          cp target/release/rooste-ssh target/release/rooste-cli LICENSE target/notices/THIRD-PARTY-LICENSES.html \
              packaging/linux/ee.prica.rooste-ssh.desktop packaging/icons/icon-256.png "target/$name/"
           tar -C target -czf "target/packages/$name.tar.gz" "$name"
           ls -la target/packages
       - name: Smoke test the installed .deb
         run: |
           sudo apt-get install -y ./target/packages/*.deb
-          rooste --version
+          rooste-ssh --version
           rooste-cli --version
           test -f /usr/share/applications/rooste-ssh.desktop || ls /usr/share/applications | grep -i rooste
           docker build -t rooste-openssh -f crates/rooste-testkit/docker/openssh/Dockerfile crates/rooste-testkit/docker
@@ -109,7 +109,7 @@ jobs:
         with:
           name: linux-binaries
           path: |
-            target/release/rooste
+            target/release/rooste-ssh
             target/release/rooste-cli
 
   macos:
@@ -151,8 +151,8 @@ jobs:
       - name: Stage the binaries
         run: |
           mkdir -p target/release
-          cp target/${{ matrix.target }}/release/rooste target/${{ matrix.target }}/release/rooste-cli target/release/
-          file target/release/rooste
+          cp target/${{ matrix.target }}/release/rooste-ssh target/${{ matrix.target }}/release/rooste-cli target/release/
+          file target/release/rooste-ssh
       - run: cargo packager --release -p rooste-ssh --formats app
       # Without a signature, macOS calls downloaded Apple Silicon apps
       # "damaged". An ad-hoc signature is free; notarization is not.
@@ -173,7 +173,7 @@ jobs:
         if: matrix.arch == 'arm64'
         run: |
           hdiutil attach target/packages/*.dmg -mountpoint /tmp/rooste-dmg
-          "/tmp/rooste-dmg/Rooste SSH.app/Contents/MacOS/rooste" --version
+          "/tmp/rooste-dmg/Rooste SSH.app/Contents/MacOS/rooste-ssh" --version
           "/tmp/rooste-dmg/Rooste SSH.app/Contents/MacOS/rooste-cli" --version
           hdiutil detach /tmp/rooste-dmg
       - uses: actions/upload-artifact@v7
@@ -219,13 +219,22 @@ jobs:
         run: |
           [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
           $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
-          & $signtool sign /f "$env:RUNNER_TEMP\cert.pfx" /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 target\release\rooste.exe target\release\rooste-cli.exe
+          & $signtool sign /f "$env:RUNNER_TEMP\cert.pfx" /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 target\release\rooste-ssh.exe target\release\rooste-cli.exe
       - run: cargo packager --release -p rooste-ssh --formats wix
       - name: Consistent file name
         shell: pwsh
         run: |
           $msi = Get-ChildItem target\packages\*.msi | Select-Object -First 1
           Rename-Item $msi.FullName "rooste-ssh-${{ steps.version.outputs.version }}-x64.msi"
+      # New versions must keep the first releases' upgrade code to upgrade
+      # existing installs (see packaging/windows/main.wxs).
+      - name: Check the upgrade code
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem target\packages\*.msi | Select-Object -First 1
+          if (-not (Select-String -Path $msi.FullName -Pattern '47B656CC-8CE9-57F4-AADC-857E1148F647' -SimpleMatch -Quiet)) {
+            Write-Error "The MSI's upgrade code changed"; exit 1
+          }
       - name: Sign installer
         if: env.HAS_CERTIFICATE == 'true'
         env:
@@ -240,7 +249,7 @@ jobs:
         run: |
           $name = "rooste-ssh-${{ steps.version.outputs.version }}-windows-x64-portable"
           New-Item -ItemType Directory "target\$name" | Out-Null
-          Copy-Item target\release\rooste.exe, target\release\rooste-cli.exe, LICENSE, target\notices\THIRD-PARTY-LICENSES.html "target\$name"
+          Copy-Item target\release\rooste-ssh.exe, target\release\rooste-cli.exe, LICENSE, target\notices\THIRD-PARTY-LICENSES.html "target\$name"
           # An empty `portable` file keeps settings next to the executable.
           New-Item -ItemType File "target\$name\portable" | Out-Null
           Compress-Archive -Path "target\$name\*" -DestinationPath "target\packages\$name.zip"
@@ -282,7 +291,7 @@ jobs:
         run: |
           Expand-Archive (Get-ChildItem target\packages\*.zip).FullName "$env:RUNNER_TEMP\portable"
           & "$env:RUNNER_TEMP\portable\rooste-cli.exe" --version
-          & "$env:RUNNER_TEMP\portable\rooste.exe" --version
+          & "$env:RUNNER_TEMP\portable\rooste-ssh.exe" --version
       - name: winget manifests
         shell: pwsh
         run: |
@@ -325,7 +334,7 @@ jobs:
       - name: Stage files
         run: |
           cp packaging/linux/* packaging/icons/icon-256.png packaging/flatpak/staging/
-          chmod +x packaging/flatpak/staging/rooste packaging/flatpak/staging/rooste-cli
+          chmod +x packaging/flatpak/staging/rooste-ssh packaging/flatpak/staging/rooste-cli
           ls -la packaging/flatpak/staging
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:

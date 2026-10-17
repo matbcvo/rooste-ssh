@@ -4,7 +4,7 @@ app-id: ee.prica.rooste-ssh
 runtime: org.freedesktop.Platform
 runtime-version: "24.08"
 sdk: org.freedesktop.Sdk
-command: rooste
+command: rooste-ssh
 finish-args:
   - --share=network
   - --share=ipc
@@ -22,7 +22,7 @@ modules:
   - name: rooste-ssh
     buildsystem: simple
     build-commands:
-      - install -Dm755 rooste /app/bin/rooste
+      - install -Dm755 rooste-ssh /app/bin/rooste-ssh
       - install -Dm755 rooste-cli /app/bin/rooste-cli
       - install -Dm644 ee.prica.rooste-ssh.desktop /app/share/applications/ee.prica.rooste-ssh.desktop
       - install -Dm644 icon-256.png /app/share/icons/hicolor/256x256/apps/ee.prica.rooste-ssh.png
