@@ -393,11 +393,20 @@ fn render_files_panel() {
 }
 
 /// Screenshots for the README, written to `target/screenshots/readme-*.png`:
-/// two sessions side by side, the file panel, the session editor, search,
-/// the command palette, the key generator, and the light theme.
+/// two sessions one above the other, the file panel, the session editor,
+/// search, the command palette, the key generator, and the light theme.
+///
+/// The sessions connect to real servers and run real commands, so all
+/// terminal output and files are genuine. Start three containers from
+/// `crates/rooste-testkit/docker/screenshot` with the hostnames `web-1`,
+/// `db-primary` and `staging`, then set `ROOSTE_SCREENSHOT_SERVERS` to their
+/// SSH ports (`web-1=2241,db-primary=2242,staging=2243`) and
+/// `ROOSTE_SCREENSHOT_KNOWN_HOSTS` to a known_hosts file with their host keys
+/// (relative to the workspace).
 #[test]
-#[ignore = "renders with wgpu; run manually to inspect the output"]
+#[ignore = "needs the screenshot servers (see the comment)"]
 fn render_readme() {
+    use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
@@ -405,74 +414,47 @@ fn render_readme() {
     use rooste_core::{Config, MemoryStore, Profile, Theme, Tunnel, TunnelKind};
     use rooste_ssh::RoosteApp;
     use rooste_ssh::app::TabState;
-    use rooste_testkit::{TEST_PASSWORD, TEST_USER, TestServer};
 
-    const PROMPT_WEB: &str = "\x1b[1;32mdeploy@web-1\x1b[0m:\x1b[1;34m~\x1b[0m$ ";
-    const PROMPT_DB: &str = "\x1b[1;32mdeploy@db-primary\x1b[0m:\x1b[1;34m~\x1b[0m$ ";
-    // Short lines, so both halves of the split view fit without wrapping.
-    let web_output = format!(
-        "{PROMPT_WEB}systemctl is-active nginx php8.3-fpm\r\n\
-         \x1b[1;32mactive\x1b[0m\r\n\
-         \x1b[1;32mactive\x1b[0m\r\n\
-         {PROMPT_WEB}ls -l --color\r\n\
-         drwxr-xr-x 2 deploy deploy 4.0K Oct 14 \x1b[1;34mlogs\x1b[0m\r\n\
-         drwxr-xr-x 5 deploy deploy 4.0K Oct 13 \x1b[1;34mreleases\x1b[0m\r\n\
-         -rw-r--r-- 1 deploy deploy  48K Oct 13 \x1b[1;31mbackup.tar.gz\x1b[0m\r\n\
-         -rwxr-xr-x 1 deploy deploy  900 Oct 12 \x1b[1;32mdeploy.sh\x1b[0m\r\n\
-         -rw-r--r-- 1 deploy deploy 2.4K Oct 10 nginx.conf\r\n\
-         {PROMPT_WEB}tail -n 5 logs/access.log\r\n\
-         16:02:11  GET   /api/health      \x1b[32m200\x1b[0m    3 ms\r\n\
-         16:02:13  POST  /api/orders      \x1b[32m201\x1b[0m   48 ms\r\n\
-         16:02:14  GET   /api/orders/88   \x1b[33m404\x1b[0m    5 ms\r\n\
-         16:02:17  POST  /api/payments    \x1b[31m502\x1b[0m  930 ms\r\n\
-         16:02:19  GET   /api/health      \x1b[32m200\x1b[0m    2 ms\r\n\
-         {PROMPT_WEB}"
-    );
-    let db_output = format!(
-        "{PROMPT_DB}psql -c 'select count(*) from orders'\r\n\
-         \x20count\r\n\
-         -------\r\n\
-         \x2048213\r\n\
-         (1 row)\r\n\
-         {PROMPT_DB}df -h /srv\r\n\
-         Filesystem      Size  Used Avail Use% Mounted on\r\n\
-         /dev/nvme1n1    500G  212G  288G  \x1b[32m43%\x1b[0m /srv\r\n\
-         {PROMPT_DB}uptime\r\n\
-         \x2016:02:31 up 41 days, load average: 0.42, 0.38, 0.35\r\n\
-         {PROMPT_DB}"
-    );
+    /// Typed into each session before the screenshot.
+    const WEB_COMMANDS: &[&str] = &[
+        "curl -sI localhost | head -n 3",
+        "ls -l",
+        "tail -n 3 logs/access.log",
+    ];
+    const DB_COMMANDS: &[&str] = &["df -h /", "free -h", "uptime"];
 
-    let net = tokio::runtime::Runtime::new().unwrap();
-    let server = net.block_on(TestServer::start());
-    let root = server.sftp_root().to_owned();
-    for dir in ["logs", "releases"] {
-        std::fs::create_dir(root.join(dir)).unwrap();
-    }
-    for (name, size) in [
-        ("backup-2026-10-13.tar.gz", 48_000),
-        ("deploy.sh", 900),
-        ("nginx.conf", 2_400),
-    ] {
-        std::fs::write(root.join(name), vec![b'x'; size]).unwrap();
-    }
-    let p = |name: &str, folder: &str| Profile {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let ports: HashMap<String, u16> = std::env::var("ROOSTE_SCREENSHOT_SERVERS")
+        .expect("ROOSTE_SCREENSHOT_SERVERS is not set (see the comment)")
+        .split(',')
+        .map(|server| {
+            let (name, port) = server.split_once('=').unwrap();
+            (name.to_owned(), port.parse().unwrap())
+        })
+        .collect();
+    let known_hosts_file = workspace.join(std::env::var("ROOSTE_SCREENSHOT_KNOWN_HOSTS").unwrap());
+    let key = workspace.join("crates/rooste-testkit/keys/id_ed25519");
+    let server = |name: &str, folder: &str| Profile {
+        name: name.into(),
+        folder: folder.into(),
+        host: "127.0.0.1".into(),
+        port: Some(ports[name]),
+        user: "deploy".into(),
+        key_file: Some(key.clone()),
+        use_agent: false,
+        ..Profile::default()
+    };
+    let web1 = server("web-1", "Production");
+    let db = server("db-primary", "Production");
+    let staging = server("staging", "Staging");
+    // Only listed (and web-2 shown in the session editor), never connected.
+    let listed = |name: &str, folder: &str| Profile {
         name: name.into(),
         folder: folder.into(),
         host: format!("{}.example.com", name.to_lowercase().replace(' ', "-")),
         user: "deploy".into(),
         ..Profile::default()
     };
-    let live = Profile {
-        name: "web-1".into(),
-        folder: "Production".into(),
-        host: "127.0.0.1".into(),
-        port: Some(server.addr.port()),
-        user: TEST_USER.into(),
-        use_agent: false,
-        save_password: true,
-        ..Profile::default()
-    };
-    // Shown in the session editor (never connected).
     let web2 = Profile {
         proxy_jump: Some("bastion.example.com".into()),
         tags: vec!["nginx".into(), "eu-west".into()],
@@ -488,37 +470,103 @@ fn render_readme() {
                 target: String::new(),
             },
         ],
-        ..p("web-2", "Production")
+        ..listed("web-2", "Production")
     };
-    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
+    let out = workspace.join("target/screenshots");
     std::fs::create_dir_all(&out).unwrap();
 
-    // A window connected to web-1, with `setup` run before rendering.
+    fn wait(harness: &mut Harness<'_, RoosteApp>, done: impl Fn(&RoosteApp) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !done(harness.state()) {
+            assert!(
+                Instant::now() < deadline,
+                "timed out: {:?}",
+                harness
+                    .state()
+                    .tabs()
+                    .map(|t| (
+                        t.name.clone(),
+                        format!("{:?}", t.state),
+                        t.terminal.screen_text(),
+                        t.files.as_ref().map(|f| (f.entries.len(), f.error.clone()))
+                    ))
+                    .collect::<Vec<_>>()
+            );
+            harness.step();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    /// Type `commands` into the session named `name`, each after the previous
+    /// one has finished (its prompt is back).
+    fn run(harness: &mut Harness<'_, RoosteApp>, name: &str, commands: &[&str]) {
+        let prompt = format!("deploy@{name}:~$");
+        let prompts = |app: &RoosteApp| {
+            app.tabs()
+                .find(|t| t.name == name)
+                .map_or(0, |t| t.terminal.screen_text().matches(&prompt).count())
+        };
+        wait(harness, |app| prompts(app) >= 1);
+        for command in commands {
+            let before = prompts(harness.state());
+            let tab = harness
+                .state_mut()
+                .tabs_mut()
+                .find(|t| t.name == name)
+                .unwrap();
+            tab.send_input(format!("{command}\r").into_bytes());
+            wait(harness, |app| prompts(app) > before);
+        }
+    }
+    fn select_backup(tab: &mut rooste_ssh::tab::SessionTab) {
+        let files = tab.files.as_mut().unwrap();
+        let backup = files
+            .entries
+            .iter()
+            .find(|e| e.name.starts_with("backup-"))
+            .unwrap();
+        files.selected = vec![backup.path.clone()];
+    }
+    fn open_files(harness: &mut Harness<'_, RoosteApp>) {
+        let tab = harness
+            .state_mut()
+            .tabs_mut()
+            .find(|t| t.name == "web-1")
+            .unwrap();
+        tab.toggle_files();
+        wait(harness, |app| {
+            app.tabs()
+                .filter_map(|t| t.files.as_ref())
+                .any(|f| f.entries.iter().any(|e| e.name == "deploy.sh"))
+        });
+        let tab = harness
+            .state_mut()
+            .tabs_mut()
+            .find(|t| t.name == "web-1")
+            .unwrap();
+        select_backup(tab);
+    }
+
+    // A window connected to web-1, which has run its commands, with `setup`
+    // run before rendering.
     let shot =
         |name: &str, theme: Theme, height: f32, setup: &dyn Fn(&mut Harness<'_, RoosteApp>)| {
-            // The three-pane overview needs more room than the other shots.
-            let width = if name == "split" || name == "light" {
+            // Shots with the file panel need more room than the others.
+            let width = if matches!(name, "split" | "light" | "files") {
                 1600.0
             } else {
                 1280.0
             };
             let dir = tempfile::tempdir().unwrap();
             let known_hosts = dir.path().join("known_hosts");
-            rooste_protocols::ssh::known_hosts::learn(
-                &known_hosts,
-                "127.0.0.1",
-                server.addr.port(),
-                &server.host_key,
-            )
-            .unwrap();
+            std::fs::copy(&known_hosts_file, &known_hosts).unwrap();
             let mut config = Config {
                 profiles: vec![
-                    live.clone(),
+                    web1.clone(),
                     web2.clone(),
-                    p("db-primary", "Production"),
-                    p("staging", "Staging"),
-                    p("Raspberry Pi", "Home"),
-                    p("NAS", "Home"),
+                    db.clone(),
+                    staging.clone(),
+                    listed("Raspberry Pi", "Home"),
+                    listed("NAS", "Home"),
                 ],
                 ..Config::default()
             };
@@ -526,16 +574,16 @@ fn render_readme() {
             config.settings.download_dir = "/home/deploy/Downloads".into();
             let app = RoosteApp::with_config(config, None, Arc::new(MemoryStore::default()))
                 .with_known_hosts(known_hosts);
-            app.secrets().set(&live.id, TEST_PASSWORD).unwrap();
             let mut harness = Harness::builder()
                 .with_size([width, height])
                 .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
             rooste_ssh::fonts::install(&harness.ctx);
             let ctx = harness.ctx.clone();
-            harness.state_mut().connect_profile(&ctx, &live.id);
+            harness.state_mut().connect_profile(&ctx, &web1.id);
             wait(&mut harness, |app| {
                 app.tabs().any(|t| t.state == TabState::Connected)
             });
+            run(&mut harness, "web-1", WEB_COMMANDS);
             setup(&mut harness);
             // Keep the mouse pointer out of the picture.
             harness.event(egui::Event::PointerGone);
@@ -548,149 +596,73 @@ fn render_readme() {
                 .save(out.join(format!("readme-{name}.png")))
                 .unwrap();
         };
-    fn wait(harness: &mut Harness<'_, RoosteApp>, done: impl Fn(&RoosteApp) -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while !done(harness.state()) {
-            assert!(
-                Instant::now() < deadline,
-                "timed out: {:?}",
-                harness
-                    .state()
-                    .tabs()
-                    .map(|t| (
-                        t.name.clone(),
-                        format!("{:?}", t.state),
-                        t.files.as_ref().map(|f| (
-                            f.entries.len(),
-                            f.handle.is_some(),
-                            f.cwd.clone(),
-                            f.error.clone()
-                        ))
-                    ))
-                    .collect::<Vec<_>>()
-            );
-            harness.step();
-            std::thread::sleep(Duration::from_millis(10));
-        }
-    }
-    let fill = |tab: &mut rooste_ssh::tab::SessionTab, text: &str| {
-        tab.terminal.advance(b"\x1b[2J\x1b[H");
-        tab.terminal.advance(text.as_bytes());
-    };
-    // web-1 on the left, db-primary split off to the right.
+    // web-1 on top with its file panel; db-primary below, with staging as a
+    // background tab beside it.
     let split = |harness: &mut Harness<'_, RoosteApp>| {
-        harness
-            .state_mut()
-            .split_active(egui_tiles::LinearDir::Vertical);
-        wait(harness, |app| {
-            app.tabs()
-                .filter(|t| t.state == TabState::Connected)
-                .count()
-                == 2
-        });
-        for _ in 0..5 {
-            harness.step();
-        }
-        // web-1 (top) gets a bit more room than db-primary (bottom).
-        let app = harness.state_mut();
-        if let Some(root) = app.tree.root
-            && let Some(egui_tiles::Tile::Container(egui_tiles::Container::Linear(linear))) =
-                app.tree.tiles.get_mut(root)
-            && let [left, right] = linear.children[..]
-        {
-            linear.shares.set_share(left, 1.25);
-            linear.shares.set_share(right, 1.0);
-        }
-        // A third session as a background tab beside db-primary.
         let ctx = harness.ctx.clone();
-        let live_id = live.id.clone();
-        harness.state_mut().connect_profile(&ctx, &live_id);
+        harness.state_mut().connect_profile(&ctx, &db.id);
+        harness.state_mut().connect_profile(&ctx, &staging.id);
         wait(harness, |app| {
             app.tabs()
                 .filter(|t| t.state == TabState::Connected)
                 .count()
                 == 3
         });
-        let mut tabs: Vec<_> = harness.state_mut().tabs_mut().collect();
-        tabs.sort_by_key(|t| t.id);
-        tabs[1].name = "db-primary".into();
-        tabs[2].name = "staging".into();
-        let ids = [tabs[0].id, tabs[1].id, tabs[2].id];
-        // Put staging next to db-primary, with web-1 and db-primary in front.
         let app = harness.state_mut();
-        let tile_of = |app: &RoosteApp, id: u64| {
+        let tile_of = |app: &RoosteApp, name: &str| {
             app.tree
                 .tiles
                 .iter()
                 .find_map(|(tile_id, tile)| {
-                    matches!(tile, egui_tiles::Tile::Pane(tab) if tab.id == id).then_some(*tile_id)
+                    matches!(tile, egui_tiles::Tile::Pane(tab) if tab.name == name)
+                        .then_some(*tile_id)
                 })
                 .unwrap()
         };
-        let [web, db, staging] = ids.map(|id| tile_of(app, id));
-        let db_group = app.tree.tiles.parent_of(db).unwrap();
-        app.tree.move_tile_to_container(staging, db_group, 1, false);
-        for tile in [web, db] {
-            if let Some(group) = app.tree.tiles.parent_of(tile)
-                && let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
-                    app.tree.tiles.get_mut(group)
+        let [web_tile, db_tile, staging_tile] =
+            ["web-1", "db-primary", "staging"].map(|name| tile_of(app, name));
+        let top = app.tree.tiles.parent_of(web_tile).unwrap();
+        let bottom = app.tree.tiles.insert_tab_tile(vec![]);
+        let split = app.tree.tiles.insert_vertical_tile(vec![top, bottom]);
+        app.tree.root = Some(split);
+        app.tree.move_tile_to_container(db_tile, bottom, 0, false);
+        app.tree
+            .move_tile_to_container(staging_tile, bottom, 1, false);
+        for (group, tile) in [(top, web_tile), (bottom, db_tile)] {
+            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
+                app.tree.tiles.get_mut(group)
             {
                 tabs.set_active(tile);
             }
         }
-        for _ in 0..3 {
-            harness.step();
+        // web-1 (top) gets a bit more room than db-primary (bottom).
+        if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Linear(linear))) =
+            app.tree.tiles.get_mut(split)
+        {
+            linear.shares.set_share(top, 1.25);
+            linear.shares.set_share(bottom, 1.0);
         }
-        let mut tabs: Vec<_> = harness.state_mut().tabs_mut().collect();
-        tabs.sort_by_key(|t| t.id);
-        tabs[0].toggle_files();
-        wait(harness, |app| {
-            app.tabs()
-                .filter_map(|t| t.files.as_ref())
-                .any(|f| f.entries.len() == 5)
-        });
         for _ in 0..5 {
             harness.step();
         }
-        let mut tabs: Vec<_> = harness.state_mut().tabs_mut().collect();
-        tabs.sort_by_key(|t| t.id);
-        fill(tabs[0], &web_output);
-        if let Some(files) = tabs[0].files.as_mut() {
-            files.selected = vec![files.entries[2].path.clone()];
-        }
-        fill(tabs[1], &db_output);
+        run(harness, "db-primary", DB_COMMANDS);
+        open_files(harness);
     };
 
     shot("split", Theme::Dark, 860.0, &split);
     shot("light", Theme::Light, 860.0, &split);
-    shot("files", Theme::Dark, 720.0, &|harness| {
-        let tab = harness.state_mut().tabs_mut().next().unwrap();
-        tab.toggle_files();
-        wait(harness, |app| {
-            app.tabs()
-                .next()
-                .and_then(|t| t.files.as_ref())
-                .is_some_and(|f| f.entries.len() == 5)
-        });
-        let tab = harness.state_mut().tabs_mut().next().unwrap();
-        fill(tab, &web_output);
-        let files = tab.files.as_mut().unwrap();
-        files.selected = vec![files.entries[2].path.clone()];
-    });
+    shot("files", Theme::Dark, 720.0, &open_files);
     shot("search", Theme::Dark, 720.0, &|harness| {
         let tab = harness.state_mut().tabs_mut().next().unwrap();
-        fill(tab, &web_output);
         tab.open_find();
         let find = tab.find.as_mut().unwrap();
-        find.query = "api/orders".into();
+        find.query = "HTTP/1.1".into();
         find.found = Some(
             tab.terminal
-                .find("api/orders", rooste_terminal::SearchDirection::Up),
+                .find("HTTP/1.1", rooste_terminal::SearchDirection::Up),
         );
     });
     shot("editor", Theme::Dark, 960.0, &|harness| {
-        let tab = harness.state_mut().tabs_mut().next().unwrap();
-        fill(tab, &web_output);
         harness.get_by_label("web-2").hover();
         harness.step();
         harness.get_by_label("web-2").click_secondary();
@@ -700,8 +672,6 @@ fn render_readme() {
         harness.step();
     });
     shot("palette", Theme::Dark, 720.0, &|harness| {
-        let tab = harness.state_mut().tabs_mut().next().unwrap();
-        fill(tab, &web_output);
         harness.key_press_modifiers(
             egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
             egui::Key::P,
@@ -711,8 +681,6 @@ fn render_readme() {
         harness.step();
     });
     shot("keygen", Theme::Dark, 720.0, &|harness| {
-        let tab = harness.state_mut().tabs_mut().next().unwrap();
-        fill(tab, &web_output);
         harness.get_by_label("Tools").click();
         harness.step();
         harness.get_by_label("Key generator…").click();
