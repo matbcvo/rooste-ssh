@@ -750,7 +750,9 @@ impl RoosteApp {
     }
 
     /// Add a tab to the tab group of `beside` (or the root).
-    fn add_tab_beside(&mut self, tab: SessionTab, beside: Option<TileId>) {
+    fn add_tab_beside(&mut self, mut tab: SessionTab, beside: Option<TileId>) {
+        // A new tab takes the keyboard focus.
+        tab.view.focus_requested = true;
         let id = self.tree.tiles.insert_pane(tab);
         let target = beside
             .and_then(|tile| self.tree.tiles.parent_of(tile))
@@ -885,7 +887,7 @@ impl RoosteApp {
     /// Open a copy of tab `active` beside its tab group.
     fn split_tab(&mut self, active: TileId, dir: LinearDir) {
         let settings = self.config.settings.clone();
-        let Some(tab) = self
+        let Some(mut tab) = self
             .tree
             .tiles
             .get_pane(&active)
@@ -893,6 +895,7 @@ impl RoosteApp {
         else {
             return;
         };
+        tab.view.focus_requested = true;
         // Split the tab group holding the active tab.
         let group = self.tree.tiles.parent_of(active).unwrap_or(active);
         let pane = self.tree.tiles.insert_pane(tab);

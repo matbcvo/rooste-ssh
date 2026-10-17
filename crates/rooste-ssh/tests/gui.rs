@@ -997,6 +997,42 @@ fn split_right_opens_a_second_session_beside_the_first() {
 }
 
 #[test]
+fn a_new_split_takes_the_keyboard_focus() {
+    let f = Fixture::with_server();
+    let mut harness = harness(app_with(&f, vec![f.profile("one")]));
+    context_menu(&mut harness, "one", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+
+    open_menu_item(&mut harness, "Tab", "Split down");
+    wait_for(&mut harness, "both connected", |app| {
+        connected_count(app) == 2
+    });
+    settle(&mut harness);
+
+    // The split's second group holds the new tab.
+    let app = harness.state();
+    let Some(egui_tiles::Tile::Container(egui_tiles::Container::Linear(split))) =
+        app.tree.tiles.get(app.tree.root.unwrap())
+    else {
+        panic!("the root is a split");
+    };
+    let pane_in = |group| match app.tree.tiles.get(group) {
+        Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) => {
+            app.tree.tiles.get_pane(&tabs.active.unwrap()).unwrap()
+        }
+        _ => panic!("a tab group"),
+    };
+    assert!(
+        !pane_in(split.children[0]).view.has_focus,
+        "the old tab lost the focus"
+    );
+    assert!(
+        pane_in(split.children[1]).view.has_focus,
+        "the new tab has the focus"
+    );
+}
+
+#[test]
 fn broadcast_input_reaches_every_tab() {
     let f = Fixture::with_server();
     let mut harness = harness(app_with(&f, vec![f.profile("one"), f.profile("two")]));

@@ -44,7 +44,7 @@ pub struct TerminalView {
     /// Mouse button currently held while reporting to the application.
     reported_button: Option<MouseButton>,
     selecting: bool,
-    /// Take keyboard focus on the next frame, e.g. when its tab is clicked.
+    /// Take keyboard focus as soon as possible, e.g. when its tab is clicked.
     pub focus_requested: bool,
     /// Whether the terminal had keyboard focus when last shown.
     pub has_focus: bool,
@@ -129,7 +129,14 @@ impl TerminalView {
             out.resize = Some((cols, rows));
         }
 
-        let (rect, response) = ui.allocate_exact_size(available, Sense::click_and_drag());
+        // A fixed id, so the keyboard focus stays when widgets above the
+        // terminal (find bar, status lines) come and go.
+        let (rect, _) = ui.allocate_exact_size(available, Sense::hover());
+        let response = ui.interact(
+            rect,
+            ui.make_persistent_id("terminal"),
+            Sense::click_and_drag(),
+        );
         let response = response.on_hover_cursor(egui::CursorIcon::Text);
         response
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Terminal"));
@@ -140,8 +147,8 @@ impl TerminalView {
         // (egui applies it at the end of the frame), so don't take it then.
         let nothing_focused = ui.memory(|m| m.focused().is_none())
             && !ui.input(|i| i.pointer.any_pressed() || i.pointer.any_released());
-        let requested = std::mem::take(&mut self.focus_requested);
-        if nothing_focused || requested || response.clicked() || response.drag_started() {
+        if nothing_focused || self.focus_requested || response.clicked() || response.drag_started()
+        {
             ui.memory_mut(|m| m.request_focus(id));
         }
         ui.memory_mut(|m| {
@@ -165,7 +172,17 @@ impl TerminalView {
         }
         self.handle_mouse(ui, term, &response, metrics, &mut out);
 
+        if self.has_focus != response.has_focus() {
+            // The tab bar, drawn before the terminal, shows which tab has
+            // the focus; draw again so it doesn't lag a frame behind.
+            ui.ctx().request_repaint();
+        }
         self.has_focus = response.has_focus();
+        // Ask until it has the focus: a click that opened this tab (e.g. on a
+        // menu) can take the focus away again in the next frame.
+        if self.has_focus {
+            self.focus_requested = false;
+        }
         self.paint(ui, rect, metrics, &term.screen(), self.has_focus);
         out
     }
