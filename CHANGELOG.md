@@ -14,6 +14,11 @@ All notable changes are listed here. The format follows
   `rooste-ssh.toml`; an existing `rooste.toml` is renamed automatically. The command-line client
   is still `rooste-cli`.
 
+### Fixed
+
+- A new tab or split now takes the keyboard focus, and the tab bar shows it right away. Before,
+  the focus could stay in (or jump back to) the other half of a split.
+
 ## [0.3.0] - 2026-10-16
 
 ### Added
