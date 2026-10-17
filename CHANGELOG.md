@@ -4,6 +4,13 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Exporting an ECDSA key to `.ppk` could write a file that couldn't be read back (about one
+  P-256 key in several hundred, when its private number starts with a zero byte).
+
 ## [0.4.0] - 2026-10-17
 
 ### Changed
