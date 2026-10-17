@@ -47,9 +47,6 @@ tempfile.workspace = true
 workspace = true
 
 # Installers and Linux packages (cargo packager, see release.yml).
-# The MSI upgrade code is derived from the main binary's name ("rooste"):
-# renaming the binary would make Windows install new versions side by side
-# instead of upgrading.
 [package.metadata.packager]
 product-name = "Rooste SSH"
 identifier = "ee.prica.rooste-ssh"
@@ -66,6 +63,11 @@ binaries-dir = "../../target/release"
 out-dir = "../../target/packages"
 binaries = [{ path = "rooste-ssh", main = true }, { path = "rooste-cli" }]
 resources = ["../../LICENSE", "../../target/notices/THIRD-PARTY-LICENSES.html"]
+
+# The MSI keeps the upgrade code of the first releases, whose binary was
+# "rooste", so new versions upgrade old installs (see the template).
+[package.metadata.packager.wix]
+template = "../../packaging/windows/main.wxs"
 
 # RPM (cargo generate-rpm -p crates/rooste-ssh).
 [package.metadata.generate-rpm]

@@ -226,6 +226,15 @@ jobs:
         run: |
           $msi = Get-ChildItem target\packages\*.msi | Select-Object -First 1
           Rename-Item $msi.FullName "rooste-ssh-${{ steps.version.outputs.version }}-x64.msi"
+      # New versions must keep the first releases' upgrade code to upgrade
+      # existing installs (see packaging/windows/main.wxs).
+      - name: Check the upgrade code
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem target\packages\*.msi | Select-Object -First 1
+          if (-not (Select-String -Path $msi.FullName -Pattern '47B656CC-8CE9-57F4-AADC-857E1148F647' -SimpleMatch -Quiet)) {
+            Write-Error "The MSI's upgrade code changed"; exit 1
+          }
       - name: Sign installer
         if: env.HAS_CERTIFICATE == 'true'
         env:
