@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use egui::{
-    Color32, CornerRadius, Event, FontId, PointerButton, Pos2, Rect, Response, Sense, Stroke,
+    Color32, CornerRadius, Event, FontId, Id, PointerButton, Pos2, Rect, Response, Sense, Stroke,
     StrokeKind, Ui, Vec2, pos2, vec2,
 };
 use rooste_terminal::input::{self, MouseAction, MouseButton};
@@ -25,6 +25,14 @@ pub struct ViewOutput {
 
 /// Gap between the terminal text and the edges of its area.
 const PADDING: f32 = 6.0;
+/// Key in egui's data: some terminal is waiting to take the keyboard focus.
+const FOCUS_PENDING: &str = "rooste-terminal-focus-pending";
+
+/// Tell the terminals drawn next whether one of them is waiting to take the
+/// keyboard focus, so the others leave it alone.
+pub fn set_focus_pending(ctx: &egui::Context, pending: bool) {
+    ctx.data_mut(|d| d.insert_temp(Id::new(FOCUS_PENDING), pending));
+}
 const MIN_FONT_SIZE: f32 = 6.0;
 const MAX_FONT_SIZE: f32 = 72.0;
 
@@ -142,11 +150,20 @@ impl TerminalView {
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Terminal"));
         let id = response.id;
         // Take keyboard focus when clicked, and whenever nothing else has it
-        // (e.g. after a dialog closes).
+        // (e.g. after a dialog closes) unless another terminal is about to
+        // take it (e.g. a tab just switched to); otherwise the first terminal
+        // drawn would grab it for a moment.
         // A click elsewhere may be giving another widget focus this frame
-        // (egui applies it at the end of the frame), so don't take it then.
+        // (egui applies it at the end of the frame), and while a button is
+        // held the focus is about to go somewhere, so don't take it then.
+        let pending = ui
+            .data(|d| d.get_temp::<bool>(Id::new(FOCUS_PENDING)))
+            .unwrap_or(false);
         let nothing_focused = ui.memory(|m| m.focused().is_none())
-            && !ui.input(|i| i.pointer.any_pressed() || i.pointer.any_released());
+            && !pending
+            && !ui.input(|i| {
+                i.pointer.any_pressed() || i.pointer.any_released() || i.pointer.any_down()
+            });
         if nothing_focused || self.focus_requested || response.clicked() || response.drag_started()
         {
             ui.memory_mut(|m| m.request_focus(id));
