@@ -325,7 +325,7 @@ jobs:
       - name: Stage files
         run: |
           cp packaging/linux/* packaging/icons/icon-256.png packaging/flatpak/staging/
-          chmod +x packaging/flatpak/staging/rooste packaging/flatpak/staging/rooste-cli
+          chmod +x packaging/flatpak/staging/rooste-ssh packaging/flatpak/staging/rooste-cli
           ls -la packaging/flatpak/staging
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
